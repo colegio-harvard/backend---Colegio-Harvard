@@ -1,0 +1,43 @@
+{
+  "name": "backend_colegio_fernando",
+  "version": "2.0.0",
+  "description": "Backend del sistema de gestion escolar Colegio Fernando",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon index.js",
+    "start": "node index.js",
+    "build": "npx prisma generate && npx prisma migrate deploy",
+    "prisma:migrate": "npx prisma migrate dev",
+    "prisma:generate": "npx prisma generate",
+    "prisma:seed": "node prisma/seed.js",
+    "prisma:reset": "npx prisma migrate reset --force",
+    "test": "jest --verbose",
+    "test:tz-utc": "TZ=UTC jest --verbose",
+    "test:tz-lima": "TZ=America/Lima jest --verbose"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@prisma/client": "^6.16.0",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "node-cron": "^3.0.3",
+    "pg": "^8.16.3",
+    "socket.io": "^4.8.3",
+    "uuid": "^11.1.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0",
+    "nodemon": "^3.1.10",
+    "prisma": "^6.16.0"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  }
+}
