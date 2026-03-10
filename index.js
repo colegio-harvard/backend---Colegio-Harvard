@@ -29,6 +29,7 @@ const notifPersonalizadasRoutes = require('./routes/notifPersonalizadasRoutes');
 // --- Controller para cron ---
 const { ejecutarAlertasNoLlego } = require('./controllers/alertasController');
 const { ejecutarProgramadas } = require('./controllers/notifPersonalizadasController');
+const { ejecutarBackup } = require('./utils/backupService');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -104,6 +105,18 @@ cron.schedule('0 8 * * *', async () => {
     await ejecutarProgramadas();
   } catch (err) {
     console.error('[CRON] Error ejecutando notificaciones programadas:', err.message);
+  }
+}, {
+  timezone: 'America/Lima'
+});
+
+// --- Cron: Backup de BD a Wasabi — todos los dias a las 2:00 AM Lima ---
+cron.schedule('0 2 * * *', async () => {
+  try {
+    console.log(`[CRON] Ejecutando backup de BD - ${new Date().toISOString()}`);
+    await ejecutarBackup();
+  } catch (err) {
+    console.error('[CRON] Error ejecutando backup:', err.message);
   }
 }, {
   timezone: 'America/Lima'

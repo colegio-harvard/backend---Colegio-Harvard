@@ -1,6 +1,8 @@
 const prisma = require('../config/prisma');
+const path = require('path');
 const { emitToUser, emitToHilo } = require('../utils/socketEmitter');
 const { enviarNotificacion } = require('../utils/notifUtils');
+const { uploadFile } = require('../utils/storageService');
 
 // FLW-19: Crear hilo de mensaje (padre<->tutor via alumno)
 const crearHilo = async (req, res) => {
@@ -19,7 +21,9 @@ const crearHilo = async (req, res) => {
 
     const msgData = { id_hilo: hilo.id, id_usuario_emisor: req.user.id, cuerpo: mensaje, user_id_registration: req.user.id };
     if (req.file) {
-      msgData.adjunto_url = `/uploads/adjuntos/${req.file.filename}`;
+      const ext = path.extname(req.file.originalname);
+      const key = `adjuntos/msg-${req.user.id}-${Date.now()}${ext}`;
+      msgData.adjunto_url = await uploadFile(req.file.buffer, key, req.file.mimetype);
       msgData.adjunto_nombre = req.file.originalname;
     }
     await prisma.tbl_mensajes.create({ data: msgData });
@@ -64,7 +68,9 @@ const responder = async (req, res) => {
   try {
     const msgData = { id_hilo, id_usuario_emisor: req.user.id, cuerpo: mensaje, user_id_registration: req.user.id };
     if (req.file) {
-      msgData.adjunto_url = `/uploads/adjuntos/${req.file.filename}`;
+      const ext = path.extname(req.file.originalname);
+      const key = `adjuntos/msg-${req.user.id}-${Date.now()}${ext}`;
+      msgData.adjunto_url = await uploadFile(req.file.buffer, key, req.file.mimetype);
       msgData.adjunto_nombre = req.file.originalname;
     }
     const msg = await prisma.tbl_mensajes.create({ data: msgData });

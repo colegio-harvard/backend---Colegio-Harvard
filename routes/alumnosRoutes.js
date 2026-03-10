@@ -4,20 +4,10 @@ const verificarToken = require('../middleware/authMiddleware');
 const verificarRol = require('../middleware/rbacMiddleware');
 const ctrl = require('../controllers/alumnosController');
 const multer = require('multer');
-const path = require('path');
 
-// Configurar multer para fotos de alumnos
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, '..', 'uploads', 'fotos'));
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `alumno-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
-  },
-});
+// Multer en memoria — el buffer se sube a Wasabi en el controller
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
     const tipos = ['image/jpeg', 'image/png', 'image/webp'];

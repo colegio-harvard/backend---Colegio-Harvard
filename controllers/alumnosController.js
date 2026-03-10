@@ -1,8 +1,10 @@
 const prisma = require('../config/prisma');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
+const path = require('path');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { validarContrasena } = require('../utils/validaciones');
+const { uploadFile } = require('../utils/storageService');
 
 const listar = async (req, res) => {
   const { id_aula, estado } = req.query;
@@ -97,8 +99,13 @@ const crear = async (req, res) => {
     const aulaExiste = await prisma.tbl_aulas.findUnique({ where: { id: parseInt(id_aula) } });
     if (!aulaExiste) return res.status(404).json({ error: 'Aula no encontrada' });
 
-    // Determinar foto_url si se subio archivo
-    const foto_url = req.file ? `/uploads/fotos/${req.file.filename}` : null;
+    // Subir foto a Wasabi si se envio archivo
+    let foto_url = null;
+    if (req.file) {
+      const ext = path.extname(req.file.originalname);
+      const key = `fotos/alumno-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+      foto_url = await uploadFile(req.file.buffer, key, req.file.mimetype);
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       // Crear alumno
@@ -192,9 +199,11 @@ const actualizar = async (req, res) => {
     if (id_aula) data.id_aula = parseInt(id_aula);
     if (estado) data.estado = estado;
 
-    // Si se subio nueva foto
+    // Si se subio nueva foto, subirla a Wasabi
     if (req.file) {
-      data.foto_url = `/uploads/fotos/${req.file.filename}`;
+      const ext = path.extname(req.file.originalname);
+      const key = `fotos/alumno-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+      data.foto_url = await uploadFile(req.file.buffer, key, req.file.mimetype);
     }
 
     const alumnoAntes = await prisma.tbl_alumnos.findUnique({ where: { id } });
@@ -214,7 +223,9 @@ const subirFoto = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No se envio ninguna imagen' });
 
-    const foto_url = `/uploads/fotos/${req.file.filename}`;
+    const ext = path.extname(req.file.originalname);
+    const key = `fotos/alumno-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+    const foto_url = await uploadFile(req.file.buffer, key, req.file.mimetype);
     await prisma.tbl_alumnos.update({
       where: { id },
       data: { foto_url, user_id_modification: req.user.id, date_time_modification: new Date() },
