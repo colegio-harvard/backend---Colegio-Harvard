@@ -12,17 +12,21 @@ const listarAnios = async (req, res) => {
 };
 
 const crearAnio = async (req, res) => {
-  const { id_colegio, anio, fecha_inicio, fecha_fin } = req.body;
+  const { anio, fecha_inicio, fecha_fin } = req.body;
   try {
+    const colegio = await prisma.tbl_colegio.findFirst();
+    if (!colegio) return res.status(400).json({ error: 'No se encontró el colegio configurado' });
+    const id_colegio = colegio.id;
+
     const existe = await prisma.tbl_anios_escolares.findFirst({ where: { id_colegio, anio } });
-    if (existe) return res.status(409).json({ error: 'Ano escolar ya existe para este colegio' });
+    if (existe) return res.status(409).json({ error: 'Año escolar ya existe para este colegio' });
 
     const nuevo = await prisma.tbl_anios_escolares.create({
       data: { id_colegio, anio, fecha_inicio: parseDateOnly(fecha_inicio), fecha_fin: parseDateOnly(fecha_fin), activo: false, user_id_registration: req.user.id },
     });
-    await registrarAuditoria({ userId: req.user.id, accion: 'CREAR_ANIO_ESCOLAR', tipoEntidad: 'tbl_anios_escolares', idEntidad: nuevo.id, resumen: `Ano escolar ${anio} creado` });
+    await registrarAuditoria({ userId: req.user.id, accion: 'CREAR_ANIO_ESCOLAR', tipoEntidad: 'tbl_anios_escolares', idEntidad: nuevo.id, resumen: `Año escolar ${anio} creado` });
     res.status(201).json(nuevo);
-  } catch (error) { res.status(500).json({ error: 'Error al crear anio escolar' }); }
+  } catch (error) { res.status(500).json({ error: 'Error al crear año escolar' }); }
 };
 
 const activarAnio = async (req, res) => {
@@ -53,11 +57,26 @@ const listarNiveles = async (req, res) => {
 };
 
 const crearNivel = async (req, res) => {
-  const { id_colegio, nombre } = req.body;
+  const { nombre } = req.body;
   try {
-    const nivel = await prisma.tbl_niveles.create({ data: { id_colegio, nombre, user_id_registration: req.user.id } });
+    const colegio = await prisma.tbl_colegio.findFirst();
+    if (!colegio) return res.status(400).json({ error: 'No se encontró el colegio configurado' });
+    const nivel = await prisma.tbl_niveles.create({ data: { id_colegio: colegio.id, nombre, user_id_registration: req.user.id } });
+    await registrarAuditoria({ userId: req.user.id, accion: 'CREAR_NIVEL', tipoEntidad: 'tbl_niveles', idEntidad: nivel.id, resumen: `Nivel "${nombre}" creado` });
     res.status(201).json(nivel);
   } catch (error) { res.status(500).json({ error: 'Error al crear nivel' }); }
+};
+
+const actualizarNivel = async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { nombre } = req.body;
+  try {
+    const nivel = await prisma.tbl_niveles.findUnique({ where: { id } });
+    if (!nivel) return res.status(404).json({ error: 'Nivel no encontrado' });
+    await prisma.tbl_niveles.update({ where: { id }, data: { nombre, user_id_modification: req.user.id, date_time_modification: new Date() } });
+    await registrarAuditoria({ userId: req.user.id, accion: 'EDITAR_NIVEL', tipoEntidad: 'tbl_niveles', idEntidad: id, resumen: `Nivel actualizado a "${nombre}"` });
+    res.json({ mensaje: 'Nivel actualizado' });
+  } catch (error) { res.status(500).json({ error: 'Error al actualizar nivel' }); }
 };
 
 // --- GRADOS ---
@@ -77,8 +96,25 @@ const crearGrado = async (req, res) => {
   const { id_nivel, nombre, orden } = req.body;
   try {
     const grado = await prisma.tbl_grados.create({ data: { id_nivel, nombre, orden: orden || 0, user_id_registration: req.user.id } });
+    await registrarAuditoria({ userId: req.user.id, accion: 'CREAR_GRADO', tipoEntidad: 'tbl_grados', idEntidad: grado.id, resumen: `Grado "${nombre}" creado` });
     res.status(201).json(grado);
   } catch (error) { res.status(500).json({ error: 'Error al crear grado' }); }
+};
+
+const actualizarGrado = async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { nombre, orden, id_nivel } = req.body;
+  try {
+    const grado = await prisma.tbl_grados.findUnique({ where: { id } });
+    if (!grado) return res.status(404).json({ error: 'Grado no encontrado' });
+    const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
+    if (nombre !== undefined) data.nombre = nombre;
+    if (orden !== undefined) data.orden = orden;
+    if (id_nivel !== undefined) data.id_nivel = id_nivel;
+    await prisma.tbl_grados.update({ where: { id }, data });
+    await registrarAuditoria({ userId: req.user.id, accion: 'EDITAR_GRADO', tipoEntidad: 'tbl_grados', idEntidad: id, resumen: `Grado actualizado a "${nombre || grado.nombre}"` });
+    res.json({ mensaje: 'Grado actualizado' });
+  } catch (error) { res.status(500).json({ error: 'Error al actualizar grado' }); }
 };
 
 // --- AULAS ---
@@ -356,8 +392,8 @@ const listarMeses = async (req, res) => {
 
 module.exports = {
   listarAnios, crearAnio, activarAnio,
-  listarNiveles, crearNivel,
-  listarGrados, crearGrado,
+  listarNiveles, crearNivel, actualizarNivel,
+  listarGrados, crearGrado, actualizarGrado,
   listarAulas, obtenerAula, crearAula, actualizarAula, asignarTutor,
   listarCalendario, actualizarDiaCalendario,
   listarPuntosEscaneo, crearPuntoEscaneo, asignarPorteria,

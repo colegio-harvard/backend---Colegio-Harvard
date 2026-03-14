@@ -12,10 +12,12 @@ router.put('/anios/:id/activar', verificarToken, verificarRol('SUPER_ADMIN', 'AD
 // Niveles
 router.get('/niveles', verificarToken, ctrl.listarNiveles);
 router.post('/niveles', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.crearNivel);
+router.put('/niveles/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.actualizarNivel);
 
 // Grados
 router.get('/grados', verificarToken, ctrl.listarGrados);
 router.post('/grados', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.crearGrado);
+router.put('/grados/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.actualizarGrado);
 
 // Aulas
 router.get('/aulas', verificarToken, ctrl.listarAulas);
