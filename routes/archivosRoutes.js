@@ -7,8 +7,8 @@ const BUCKET = process.env.WASABI_BUCKET || 'colegio-fernando-storage';
 
 // Proxy: sirve archivos de Wasabi sin requerir acceso público al bucket.
 // GET /api/archivos/fotos/alumno-123.jpg  →  stream desde Wasabi
-router.get('/*', async (req, res) => {
-  const key = req.params[0];
+router.get('/:key(*)', async (req, res) => {
+  const key = req.params.key;
   if (!key) return res.status(400).json({ error: 'Key requerida' });
 
   try {
