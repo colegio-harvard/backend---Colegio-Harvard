@@ -25,6 +25,7 @@ const anioEscolarRoutes = require('./routes/anioEscolarRoutes');
 const auditoriaRoutes = require('./routes/auditoriaRoutes');
 const landingRoutes = require('./routes/landingRoutes');
 const notifPersonalizadasRoutes = require('./routes/notifPersonalizadasRoutes');
+const archivosRoutes = require('./routes/archivosRoutes');
 
 // --- Controller para cron ---
 const { ejecutarAlertasNoLlego } = require('./controllers/alertasController');
@@ -72,6 +73,7 @@ app.use('/api/anio-escolar', anioEscolarRoutes);
 app.use('/api/auditoria', auditoriaRoutes);
 app.use('/api/landing', landingRoutes);
 app.use('/api/notificaciones-personalizadas', notifPersonalizadasRoutes);
+app.use('/api/archivos', archivosRoutes);
 
 // --- Ruta de prueba ---
 app.get('/api/ping', async (req, res) => {
