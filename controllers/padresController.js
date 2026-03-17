@@ -119,10 +119,11 @@ const crear = async (req, res) => {
 
 const actualizar = async (req, res) => {
   const id = parseInt(req.params.id);
-  const { nombre_completo, celular } = req.body;
+  const { dni, nombre_completo, celular } = req.body;
 
   try {
     const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
+    if (dni) data.dni = dni;
     if (nombre_completo) data.nombre_completo = nombre_completo;
     if (celular) data.celular = celular;
 
