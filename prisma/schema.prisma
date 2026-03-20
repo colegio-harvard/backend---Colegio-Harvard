@@ -318,7 +318,7 @@ model tbl_eventos_asistencia {
   fecha_hora_evento       DateTime             @db.Timestamptz(6)
   tipo_evento             String               @db.VarChar(20)
   metodo                  String               @db.VarChar(10)
-  id_punto_escaneo        Int
+  id_punto_escaneo        Int?
   registrado_por          Int
   user_id_registration    Int?
   date_time_registration  DateTime?            @default(now()) @db.Timestamptz(6)
@@ -328,7 +328,7 @@ model tbl_eventos_asistencia {
   checkout_asistencia_dia tbl_asistencia_dia[] @relation("checkout_event")
   tbl_alumnos             tbl_alumnos          @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
   tbl_anios_escolares     tbl_anios_escolares  @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
-  tbl_puntos_escaneo      tbl_puntos_escaneo   @relation(fields: [id_punto_escaneo], references: [id], onDelete: NoAction)
+  tbl_puntos_escaneo      tbl_puntos_escaneo?  @relation(fields: [id_punto_escaneo], references: [id], onDelete: NoAction)
   tbl_usuarios            tbl_usuarios         @relation(fields: [registrado_por], references: [id], onDelete: NoAction)
 }
 

@@ -6,6 +6,7 @@ const { validarContrasena } = require('../utils/validaciones');
 const listar = async (req, res) => {
   try {
     const padres = await prisma.tbl_padres.findMany({
+      where: { tbl_usuarios: { estado: { not: 'ELIMINADO' } } },
       include: {
         tbl_usuarios: { select: { id: true, username: true, estado: true } },
         tbl_padres_alumnos: { include: { tbl_alumnos: { select: { id: true, nombre_completo: true, codigo_alumno: true } } } },
@@ -88,10 +89,14 @@ const crear = async (req, res) => {
   }
 
   try {
-    const dniExiste = await prisma.tbl_padres.findUnique({ where: { dni } });
+    const dniExiste = await prisma.tbl_padres.findFirst({
+      where: { dni, tbl_usuarios: { estado: { not: 'ELIMINADO' } } },
+    });
     if (dniExiste) return res.status(409).json({ error: 'DNI ya registrado' });
 
-    const usernameExiste = await prisma.tbl_usuarios.findUnique({ where: { username } });
+    const usernameExiste = await prisma.tbl_usuarios.findFirst({
+      where: { username, estado: { not: 'ELIMINADO' } },
+    });
     if (usernameExiste) return res.status(409).json({ error: 'Username ya existe' });
 
     const rolPadre = await prisma.tbl_roles.findUnique({ where: { codigo: 'PADRE' } });
@@ -136,16 +141,32 @@ const actualizar = async (req, res) => {
 const eliminar = async (req, res) => {
   const id = parseInt(req.params.id);
   try {
-    const padre = await prisma.tbl_padres.findUnique({ where: { id } });
+    const padre = await prisma.tbl_padres.findUnique({ where: { id }, include: { tbl_usuarios: true } });
     if (!padre) return res.status(404).json({ error: 'Padre no encontrado' });
+    if (padre.tbl_usuarios?.estado === 'ELIMINADO') return res.status(400).json({ error: 'Padre ya fue eliminado' });
 
-    if (padre.id_usuario) {
-      await prisma.tbl_usuarios.update({ where: { id: padre.id_usuario }, data: { estado: 'ELIMINADO', user_id_modification: req.user.id, date_time_modification: new Date() } });
-    }
+    const suffix = `_DELETED_${id}`;
+    await prisma.$transaction(async (tx) => {
+      // Liberar DNI del padre agregando sufijo
+      await tx.tbl_padres.update({
+        where: { id },
+        data: { dni: padre.dni + suffix, user_id_modification: req.user.id, date_time_modification: new Date() },
+      });
+      // Marcar usuario como ELIMINADO y liberar username
+      if (padre.id_usuario) {
+        await tx.tbl_usuarios.update({
+          where: { id: padre.id_usuario },
+          data: { estado: 'ELIMINADO', username: padre.tbl_usuarios.username + suffix, user_id_modification: req.user.id, date_time_modification: new Date() },
+        });
+      }
+    });
 
-    await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINAR_PADRE', tipoEntidad: 'tbl_padres', idEntidad: id, resumen: `Padre ${padre.nombre_completo} eliminado (soft)` });
+    await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINAR_PADRE', tipoEntidad: 'tbl_padres', idEntidad: id, resumen: `Padre ${padre.nombre_completo} (DNI: ${padre.dni}) eliminado (soft)` });
     res.json({ mensaje: 'Padre eliminado' });
-  } catch (error) { res.status(500).json({ error: 'Error al eliminar padre' }); }
+  } catch (error) {
+    console.error('Error al eliminar padre:', error);
+    res.status(500).json({ error: 'Error al eliminar padre' });
+  }
 };
 
 const buscar = async (req, res) => {
@@ -156,6 +177,7 @@ const buscar = async (req, res) => {
   try {
     const padres = await prisma.tbl_padres.findMany({
       where: {
+        tbl_usuarios: { estado: { not: 'ELIMINADO' } },
         OR: [
           { dni: { startsWith: q } },
           { nombre_completo: { contains: q, mode: 'insensitive' } },

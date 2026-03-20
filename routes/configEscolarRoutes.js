@@ -7,6 +7,7 @@ const ctrl = require('../controllers/configEscolarController');
 // Anios escolares
 router.get('/anios', verificarToken, ctrl.listarAnios);
 router.post('/anios', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.crearAnio);
+router.put('/anios/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.actualizarAnio);
 router.put('/anios/:id/activar', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.activarAnio);
 
 // Niveles

@@ -29,6 +29,29 @@ const crearAnio = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al crear año escolar' }); }
 };
 
+const actualizarAnio = async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { anio, fecha_inicio, fecha_fin } = req.body;
+  try {
+    const existente = await prisma.tbl_anios_escolares.findUnique({ where: { id } });
+    if (!existente) return res.status(404).json({ error: 'Año escolar no encontrado' });
+
+    if (anio && anio !== existente.anio) {
+      const duplicado = await prisma.tbl_anios_escolares.findFirst({ where: { id_colegio: existente.id_colegio, anio, NOT: { id } } });
+      if (duplicado) return res.status(409).json({ error: 'Ya existe un año escolar con ese número para este colegio' });
+    }
+
+    const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
+    if (anio !== undefined) data.anio = anio;
+    if (fecha_inicio !== undefined) data.fecha_inicio = parseDateOnly(fecha_inicio);
+    if (fecha_fin !== undefined) data.fecha_fin = parseDateOnly(fecha_fin);
+
+    await prisma.tbl_anios_escolares.update({ where: { id }, data });
+    await registrarAuditoria({ userId: req.user.id, accion: 'EDITAR_ANIO_ESCOLAR', tipoEntidad: 'tbl_anios_escolares', idEntidad: id, resumen: `Año escolar ${anio || existente.anio} actualizado` });
+    res.json({ mensaje: 'Año escolar actualizado' });
+  } catch (error) { res.status(500).json({ error: 'Error al actualizar año escolar' }); }
+};
+
 const activarAnio = async (req, res) => {
   const id = parseInt(req.params.id);
   try {
@@ -391,7 +414,7 @@ const listarMeses = async (req, res) => {
 };
 
 module.exports = {
-  listarAnios, crearAnio, activarAnio,
+  listarAnios, crearAnio, actualizarAnio, activarAnio,
   listarNiveles, crearNivel, actualizarNivel,
   listarGrados, crearGrado, actualizarGrado,
   listarAulas, obtenerAula, crearAula, actualizarAula, asignarTutor,

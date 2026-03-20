@@ -9,7 +9,7 @@ const { uploadFile } = require('../utils/storageService');
 const listar = async (req, res) => {
   const { id_aula, estado } = req.query;
   try {
-    const where = {};
+    const where = { estado: { not: 'DELETED' } };
     if (id_aula) where.id_aula = parseInt(id_aula);
     if (estado) where.estado = estado;
 
@@ -85,13 +85,13 @@ const crear = async (req, res) => {
 
   try {
     const codigoExiste = await prisma.tbl_alumnos.findFirst({
-      where: { codigo_alumno: { equals: codigo_alumno, mode: 'insensitive' } },
+      where: { codigo_alumno: { equals: codigo_alumno, mode: 'insensitive' }, estado: { not: 'DELETED' } },
     });
     if (codigoExiste) return res.status(409).json({ error: 'Codigo de alumno ya existe' });
 
     if (dni) {
       const dniAlumnoExiste = await prisma.tbl_alumnos.findFirst({
-        where: { dni: { equals: dni, mode: 'insensitive' } },
+        where: { dni: { equals: dni, mode: 'insensitive' }, estado: { not: 'DELETED' } },
       });
       if (dniAlumnoExiste) return res.status(409).json({ error: 'DNI de alumno ya registrado' });
     }
@@ -128,7 +128,9 @@ const crear = async (req, res) => {
 
       // Registrar/vincular padre si se proporciono DNI de padre
       if (padre_dni) {
-        let padre = await tx.tbl_padres.findUnique({ where: { dni: padre_dni } });
+        let padre = await tx.tbl_padres.findFirst({
+          where: { dni: padre_dni, tbl_usuarios: { estado: { not: 'ELIMINADO' } } },
+        });
 
         if (!padre) {
           // Crear padre nuevo: requiere datos completos
@@ -136,7 +138,7 @@ const crear = async (req, res) => {
             throw new Error('PADRE_DATOS_INCOMPLETOS');
           }
 
-          const usernameExiste = await tx.tbl_usuarios.findUnique({ where: { username: padre_username } });
+          const usernameExiste = await tx.tbl_usuarios.findFirst({ where: { username: padre_username, estado: { not: 'ELIMINADO' } } });
           if (usernameExiste) throw new Error('PADRE_USERNAME_EXISTE');
 
           const validacion = validarContrasena(padre_contrasena);
@@ -188,7 +190,7 @@ const actualizar = async (req, res) => {
     // Validar duplicado de DNI (excluyendo al alumno actual)
     if (dni) {
       const dniDuplicado = await prisma.tbl_alumnos.findFirst({
-        where: { dni: { equals: dni, mode: 'insensitive' }, id: { not: id } },
+        where: { dni: { equals: dni, mode: 'insensitive' }, id: { not: id }, estado: { not: 'DELETED' } },
       });
       if (dniDuplicado) return res.status(409).json({ error: 'DNI de alumno ya registrado' });
     }
@@ -311,4 +313,33 @@ const reemitirCarnet = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al reemitir carnet' }); }
 };
 
-module.exports = { listar, obtenerPorId, crear, actualizar, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };
+// Soft delete — cambia estado a DELETED
+const eliminar = async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const alumno = await prisma.tbl_alumnos.findUnique({ where: { id } });
+    if (!alumno) return res.status(404).json({ error: 'Alumno no encontrado' });
+    if (alumno.estado === 'DELETED') return res.status(400).json({ error: 'Alumno ya fue eliminado' });
+
+    // Liberar codigo_alumno y dni para reutilizacion agregando sufijo _DELETED_{id}
+    const suffix = `_DELETED_${id}`;
+    await prisma.tbl_alumnos.update({
+      where: { id },
+      data: {
+        estado: 'DELETED',
+        codigo_alumno: alumno.codigo_alumno + suffix,
+        dni: alumno.dni ? alumno.dni + suffix : null,
+        user_id_modification: req.user.id,
+        date_time_modification: new Date(),
+      },
+    });
+
+    await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINAR_ALUMNO', tipoEntidad: 'tbl_alumnos', idEntidad: id, resumen: `Alumno ${alumno.nombre_completo} (${alumno.codigo_alumno}) eliminado (soft delete)` });
+    res.json({ data: { mensaje: 'Alumno eliminado' } });
+  } catch (error) {
+    console.error('Error al eliminar alumno:', error);
+    res.status(500).json({ error: 'Error al eliminar alumno' });
+  }
+};
+
+module.exports = { listar, obtenerPorId, crear, actualizar, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet, eliminar };

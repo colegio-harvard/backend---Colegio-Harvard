@@ -24,6 +24,7 @@ router.delete('/desvincular/:id_alumno', verificarToken, verificarRol('SUPER_ADM
 router.post('/reemitir-carnet/:id_alumno', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.reemitirCarnet);
 router.get('/:id', verificarToken, ctrl.obtenerPorId);
 router.put('/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), upload.single('foto'), ctrl.actualizar);
+router.delete('/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.eliminar);
 router.post('/:id/foto', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), upload.single('foto'), ctrl.subirFoto);
 
 module.exports = router;

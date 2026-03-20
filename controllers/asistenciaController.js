@@ -34,7 +34,6 @@ const registrarEvento = async (req, res) => {
     if (!anioActivo) return res.status(400).json({ error: 'No hay ano escolar activo' });
 
     const asignacion = await prisma.tbl_asignaciones_porteria.findUnique({ where: { id_usuario_porteria: req.user.id } });
-    if (!asignacion) return res.status(403).json({ error: 'No tiene punto de escaneo asignado' });
 
     const ahora = utcNow();
     const { date: fechaHoy } = todayLima();
@@ -61,7 +60,7 @@ const registrarEvento = async (req, res) => {
         id_anio_escolar: anioActivo.id, id_alumno: alumno.id,
         fecha_evento: fechaHoy, hora_evento: ahora, fecha_hora_evento: ahora,
         tipo_evento: tipoEvento, metodo,
-        id_punto_escaneo: asignacion.id_punto_escaneo,
+        id_punto_escaneo: asignacion?.id_punto_escaneo || null,
         registrado_por: req.user.id, user_id_registration: req.user.id,
       },
     });

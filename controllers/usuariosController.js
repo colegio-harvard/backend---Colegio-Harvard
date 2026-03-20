@@ -65,7 +65,7 @@ const crear = async (req, res) => {
       }
     }
 
-    const existe = await prisma.tbl_usuarios.findUnique({ where: { username } });
+    const existe = await prisma.tbl_usuarios.findFirst({ where: { username, estado: { not: 'ELIMINADO' } } });
     if (existe) return res.status(409).json({ error: 'Username ya existe' });
 
     const hash = await bcrypt.hash(contrasena, 10);
@@ -130,10 +130,21 @@ const resetearContrasena = async (req, res) => {
 const eliminar = async (req, res) => {
   const id = parseInt(req.params.id);
   try {
-    await prisma.tbl_usuarios.update({ where: { id }, data: { estado: 'ELIMINADO', user_id_modification: req.user.id, date_time_modification: new Date() } });
-    await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINAR_USUARIO', tipoEntidad: 'tbl_usuarios', idEntidad: id, resumen: `Usuario ${id} eliminado (soft)` });
+    const usuario = await prisma.tbl_usuarios.findUnique({ where: { id } });
+    if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (usuario.estado === 'ELIMINADO') return res.status(400).json({ error: 'Usuario ya fue eliminado' });
+
+    const suffix = `_DELETED_${id}`;
+    await prisma.tbl_usuarios.update({
+      where: { id },
+      data: { estado: 'ELIMINADO', username: usuario.username + suffix, user_id_modification: req.user.id, date_time_modification: new Date() },
+    });
+    await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINAR_USUARIO', tipoEntidad: 'tbl_usuarios', idEntidad: id, resumen: `Usuario ${usuario.username} (${id}) eliminado (soft)` });
     res.json({ mensaje: 'Usuario eliminado' });
-  } catch (error) { res.status(500).json({ error: 'Error al eliminar usuario' }); }
+  } catch (error) {
+    console.error('Error al eliminar usuario:', error);
+    res.status(500).json({ error: 'Error al eliminar usuario' });
+  }
 };
 
 const listarRoles = async (_req, res) => {
