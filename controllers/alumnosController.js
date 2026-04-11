@@ -28,6 +28,7 @@ const listar = async (req, res) => {
       codigo_alumno: a.codigo_alumno,
       dni: a.dni,
       nombre_completo: a.nombre_completo,
+      monto_pension: a.monto_pension ? Number(a.monto_pension) : null,
       foto_url: a.foto_url,
       estado: a.estado,
       id_aula: a.id_aula,
@@ -77,7 +78,7 @@ const obtenerPorId = async (req, res) => {
 };
 
 const crear = async (req, res) => {
-  const { codigo_alumno, dni, nombre_completo, id_aula, padre_dni, padre_nombre, padre_celular, padre_username, padre_contrasena } = req.body;
+  const { codigo_alumno, dni, nombre_completo, id_aula, monto_pension, padre_dni, padre_nombre, padre_celular, padre_username, padre_contrasena } = req.body;
 
   if (!codigo_alumno || !nombre_completo || !id_aula) {
     return res.status(400).json({ error: 'Codigo, nombre y aula son obligatorios' });
@@ -114,6 +115,7 @@ const crear = async (req, res) => {
           codigo_alumno,
           dni: dni || null,
           nombre_completo,
+          monto_pension: monto_pension ? parseFloat(monto_pension) : null,
           foto_url,
           estado: 'ACTIVO',
           id_aula: parseInt(id_aula),
@@ -184,9 +186,17 @@ const crear = async (req, res) => {
 
 const actualizar = async (req, res) => {
   const id = parseInt(req.params.id);
-  const { nombre_completo, dni, id_aula, estado } = req.body;
+  const { codigo_alumno, nombre_completo, dni, id_aula, estado, monto_pension, padre_id } = req.body;
 
   try {
+    // Validar duplicado de codigo_alumno (excluyendo al alumno actual)
+    if (codigo_alumno) {
+      const codigoDuplicado = await prisma.tbl_alumnos.findFirst({
+        where: { codigo_alumno: { equals: codigo_alumno, mode: 'insensitive' }, id: { not: id }, estado: { not: 'DELETED' } },
+      });
+      if (codigoDuplicado) return res.status(409).json({ error: 'Codigo de alumno ya existe' });
+    }
+
     // Validar duplicado de DNI (excluyendo al alumno actual)
     if (dni) {
       const dniDuplicado = await prisma.tbl_alumnos.findFirst({
@@ -196,10 +206,12 @@ const actualizar = async (req, res) => {
     }
 
     const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
+    if (codigo_alumno) data.codigo_alumno = codigo_alumno;
     if (nombre_completo) data.nombre_completo = nombre_completo;
     if (dni !== undefined) data.dni = dni || null;
     if (id_aula) data.id_aula = parseInt(id_aula);
     if (estado) data.estado = estado;
+    if (monto_pension !== undefined) data.monto_pension = monto_pension ? parseFloat(monto_pension) : null;
 
     // Si se subio nueva foto, subirla a Wasabi
     if (req.file) {
@@ -215,8 +227,37 @@ const actualizar = async (req, res) => {
       await registrarAuditoria({ userId: req.user.id, accion: 'CAMBIO_AULA_ALUMNO', tipoEntidad: 'tbl_alumnos', idEntidad: id, resumen: `Alumno ${id} cambiado de aula ${alumnoAntes.id_aula} a ${id_aula}`, meta: { aula_anterior: alumnoAntes.id_aula, aula_nueva: parseInt(id_aula) } });
     }
 
+    // Actualizar vinculo padre si se envio padre_id
+    if (padre_id !== undefined) {
+      const padreIdInt = padre_id ? parseInt(padre_id) : null;
+      const vinculoActual = await prisma.tbl_padres_alumnos.findUnique({ where: { id_alumno: id } });
+
+      if (padreIdInt) {
+        if (vinculoActual) {
+          // Cambiar padre vinculado
+          if (vinculoActual.id_padre !== padreIdInt) {
+            await prisma.tbl_padres_alumnos.update({
+              where: { id_alumno: id },
+              data: { id_padre: padreIdInt, user_id_modification: req.user.id, date_time_modification: new Date() },
+            });
+          }
+        } else {
+          // Crear nuevo vinculo
+          await prisma.tbl_padres_alumnos.create({
+            data: { id_padre: padreIdInt, id_alumno: id, user_id_registration: req.user.id },
+          });
+        }
+      } else if (vinculoActual) {
+        // Desvincular padre (padre_id enviado como vacio)
+        await prisma.tbl_padres_alumnos.delete({ where: { id_alumno: id } });
+      }
+    }
+
     res.json({ data: { mensaje: 'Alumno actualizado' } });
-  } catch (error) { res.status(500).json({ error: 'Error al actualizar alumno' }); }
+  } catch (error) {
+    console.error('Error al actualizar alumno:', error);
+    res.status(500).json({ error: 'Error al actualizar alumno' });
+  }
 };
 
 // Subir foto del alumno (endpoint separado para cambiar foto existente)

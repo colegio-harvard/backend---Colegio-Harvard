@@ -52,6 +52,12 @@ const ejecutarAlertasNoLlego = async (idAnioEscolar) => {
 
       if (asistencia && asistencia.estado !== 'AUSENTE') continue;
 
+      // Verificar evento CHECKIN real (fuente de verdad inmutable contra race conditions)
+      const checkinHoy = await prisma.tbl_eventos_asistencia.findFirst({
+        where: { id_alumno: alumno.id, fecha_evento: fechaHoy, tipo_evento: 'CHECKIN' },
+      });
+      if (checkinHoy) continue;
+
       const alertaExistente = await prisma.tbl_alertas.findFirst({
         where: { id_alumno: alumno.id, fecha: fechaHoy, tipo: 'NO_LLEGO' },
       });
@@ -64,10 +70,22 @@ const ejecutarAlertasNoLlego = async (idAnioEscolar) => {
         },
       });
 
-      await prisma.tbl_asistencia_dia.upsert({
-        where: { id_alumno_fecha: { id_alumno: alumno.id, fecha: fechaHoy } },
-        update: { estado: 'AUSENTE', id_alerta_no_llego: alerta.id },
-        create: { id_anio_escolar: idAnioEscolar, id_alumno: alumno.id, fecha: fechaHoy, estado: 'AUSENTE', id_alerta_no_llego: alerta.id },
+      // Transacción para no sobreescribir asistencia real (PRESENTE/TARDE)
+      await prisma.$transaction(async (tx) => {
+        const actual = await tx.tbl_asistencia_dia.findUnique({
+          where: { id_alumno_fecha: { id_alumno: alumno.id, fecha: fechaHoy } },
+        });
+        if (actual && actual.id_evento_checkin) return;
+        if (actual) {
+          await tx.tbl_asistencia_dia.update({
+            where: { id: actual.id },
+            data: { estado: 'AUSENTE', id_alerta_no_llego: alerta.id },
+          });
+        } else {
+          await tx.tbl_asistencia_dia.create({
+            data: { id_anio_escolar: idAnioEscolar, id_alumno: alumno.id, fecha: fechaHoy, estado: 'AUSENTE', id_alerta_no_llego: alerta.id },
+          });
+        }
       });
 
       // Notificar al padre (respeta habilitada, tipo_entrega y cuerpo de la plantilla)
@@ -88,7 +106,7 @@ const ejecutarAlertasNoLlego = async (idAnioEscolar) => {
         const mensajeSocket = plantillaNoLlego
           ? renderTemplate(plantillaNoLlego.titulo, varsAlerta)
           : alumno.nombre_completo;
-        emitToUser(padreUserId, 'alerta:nueva', { id: alerta.id, tipo: 'NO_LLEGO', estado: 'ABIERTA', fecha: fechaHoy, alumno: { nombre_completo: alumno.nombre_completo }, mensaje: mensajeSocket });
+        emitToUser(padreUserId, 'alerta:nueva', { id: alerta.id, tipo: 'NO_LLEGO', estado: 'ABIERTA', fecha: fechaHoy, id_alumno: alumno.id, alumno: { nombre_completo: alumno.nombre_completo }, mensaje: mensajeSocket });
       }
 
       alertasGeneradas++;
@@ -149,6 +167,7 @@ const listarAlertasPadre = async (req, res) => {
         tipo: a.tipo,
         estado: a.estado,
         fecha: a.fecha,
+        id_alumno: a.id_alumno,
         date_time_registration: a.date_time_registration,
         alumno: a.tbl_alumnos ? {
           nombre_completo: a.tbl_alumnos.nombre_completo,

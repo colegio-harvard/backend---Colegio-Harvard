@@ -128,7 +128,7 @@ cron.schedule('0 2 * * *', async () => {
 const server = http.createServer(app);
 initSocket(server);
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', async () => {
   // Banner de inicio — muestra claramente en qué entorno estamos
   console.log('='.repeat(55));
   if (isProduction) {
@@ -140,5 +140,18 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  Puerto: ${PORT}`);
   console.log(`  Timezone del proceso: ${process.env.TZ || 'no definido'}`);
   console.log(`  CORS origen: ${corsOptions.origin === '*' ? '* (cualquier origen — modo local)' : corsOptions.origin}`);
+
+  // Verificar que Prisma opera en UTC (crítico para campos @db.Time)
+  try {
+    const [row] = await prisma.$queryRaw`SHOW timezone`;
+    const tz = row.TimeZone || row.timezone;
+    if (tz === 'UTC') {
+      console.log(`  Prisma DB timezone: ${tz} (OK)`);
+    } else {
+      console.error(`  ⚠ Prisma DB timezone: ${tz} — DEBE SER UTC`);
+      console.error('    Los campos Time(6) tendrán desfase horario.');
+    }
+  } catch { /* silenciar si la DB no está lista aún */ }
+
   console.log('='.repeat(55));
 });

@@ -239,6 +239,7 @@ model tbl_alumnos {
   codigo_alumno          String                   @unique @db.VarChar(50)
   dni                    String?                  @unique @db.VarChar(20)
   nombre_completo        String                   @db.VarChar(200)
+  monto_pension          Decimal?                 @db.Decimal(10, 2)
   foto_url               String?
   estado                 String                   @default("ACTIVO") @db.VarChar(20)
   id_aula                Int

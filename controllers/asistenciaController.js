@@ -133,6 +133,7 @@ const registrarEvento = async (req, res) => {
       data: {
         tipo_evento: tipoEvento,
         alumno: alumno.nombre_completo,
+        dni: alumno.dni,
         foto: alumno.foto_url,
         aula: alumno.tbl_aulas.seccion,
         fecha_hora: toUtcIso(ahora),
@@ -415,7 +416,7 @@ const exportarExcel = async (req, res) => {
       Nivel: r.tbl_alumnos?.tbl_aulas?.tbl_grados?.tbl_niveles?.nombre || '',
       Grado: r.tbl_alumnos?.tbl_aulas?.tbl_grados?.nombre || '',
       Seccion: r.tbl_alumnos?.tbl_aulas?.seccion || '',
-      Estado: r.estado,
+      Estado: r.estado === 'PRESENTE' ? 'Asistió' : r.estado === 'TARDE' ? 'Tardanza' : r.estado === 'AUSENTE' ? 'Faltó' : r.estado,
       Metodo: r.tbl_evento_checkin?.metodo || '',
       'Hora Ingreso': r.tbl_evento_checkin?.hora_evento ? new Date(r.tbl_evento_checkin.hora_evento).toLocaleTimeString('es-PE', { timeZone: 'America/Lima' }) : '',
       'Hora Salida': r.tbl_evento_checkout?.hora_evento ? new Date(r.tbl_evento_checkout.hora_evento).toLocaleTimeString('es-PE', { timeZone: 'America/Lima' }) : 'No registrada',
