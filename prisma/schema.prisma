@@ -1,0 +1,686 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model tbl_roles {
+  id                     Int                  @id @default(autoincrement())
+  codigo                 String               @unique @db.VarChar(50)
+  nombre                 String               @unique @db.VarChar(50)
+  descripcion            String?
+  user_id_registration   Int?
+  date_time_registration DateTime?            @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?            @db.Timestamptz(6)
+  tbl_roles_permisos     tbl_roles_permisos[]
+  tbl_usuarios           tbl_usuarios[]
+}
+
+model tbl_permisos {
+  id                     Int                  @id @default(autoincrement())
+  codigo                 String               @unique @db.VarChar(100)
+  nombre                 String               @db.VarChar(100)
+  descripcion            String?
+  tipo                   String               @db.VarChar(50)
+  recurso                String?              @db.VarChar(200)
+  user_id_registration   Int?
+  date_time_registration DateTime?            @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?            @db.Timestamptz(6)
+  tbl_roles_permisos     tbl_roles_permisos[]
+}
+
+model tbl_roles_permisos {
+  id                     Int          @id @default(autoincrement())
+  id_rol                 Int
+  id_permiso             Int
+  user_id_registration   Int?
+  date_time_registration DateTime?    @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?    @db.Timestamptz(6)
+  tbl_permisos           tbl_permisos @relation(fields: [id_permiso], references: [id], onDelete: Cascade)
+  tbl_roles              tbl_roles    @relation(fields: [id_rol], references: [id], onDelete: Cascade)
+
+  @@unique([id_rol, id_permiso], map: "uq_rol_permiso")
+}
+
+model tbl_usuarios {
+  id                                        Int                                     @id @default(autoincrement())
+  username                                  String                                  @unique @db.VarChar(100)
+  contrasena                                String                                  @db.VarChar(255)
+  nombres                                   String                                  @db.VarChar(200)
+  id_rol                                    Int
+  estado                                    String                                  @default("ACTIVO") @db.VarChar(20)
+  intentos_fallidos                         Int                                     @default(0)
+  bloqueado_hasta                           DateTime?                               @db.Timestamptz(6)
+  user_id_registration                      Int?
+  date_time_registration                    DateTime?                               @default(now()) @db.Timestamptz(6)
+  user_id_modification                      Int?
+  date_time_modification                    DateTime?                               @db.Timestamptz(6)
+  tbl_asignaciones_porteria                 tbl_asignaciones_porteria?
+  tbl_asignaciones_tutor                    tbl_asignaciones_tutor[]
+  tbl_auditoria                             tbl_auditoria[]
+  tbl_carnets_emitidos                      tbl_carnets[]
+  tbl_comunicados                           tbl_comunicados[]
+  tbl_correcciones_asistencia               tbl_correcciones_asistencia[]
+  tbl_destinatarios_notif_personalizada     tbl_destinatarios_notif_personalizada[]
+  tbl_entradas_agenda                       tbl_entradas_agenda[]
+  tbl_pension_updated                       tbl_estado_pension[]
+  tbl_eventos_asistencia                    tbl_eventos_asistencia[]
+  tbl_hilos_mensaje                         tbl_hilos_mensaje[]
+  tbl_lecturas_comunicado                   tbl_lecturas_comunicado[]
+  tbl_mensajes                              tbl_mensajes[]
+  tbl_notificaciones                        tbl_notificaciones[]
+  tbl_notificaciones_personalizadas_creadas tbl_notificaciones_personalizadas[]     @relation("notif_personal_creador")
+  tbl_padres                                tbl_padres?
+  tbl_pagos_pension                         tbl_pagos_pension[]
+  tbl_plantilla_pension                     tbl_plantilla_pension[]
+  tbl_reportes_semanales                    tbl_reportes_semanales[]
+  tbl_roles                                 tbl_roles                               @relation(fields: [id_rol], references: [id], onDelete: NoAction)
+}
+
+model tbl_colegio {
+  id                     Int                   @id @default(autoincrement())
+  nombre                 String                @db.VarChar(200)
+  timezone               String                @default("America/Lima") @db.VarChar(50)
+  telefono_whatsapp      String?               @db.VarChar(20)
+  user_id_registration   Int?
+  date_time_registration DateTime?             @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?             @db.Timestamptz(6)
+  descripcion            String?
+  direccion              String?               @db.VarChar(300)
+  email                  String?               @db.VarChar(100)
+  lema                   String?               @db.VarChar(300)
+  telefono               String?               @db.VarChar(20)
+  tbl_anios_escolares    tbl_anios_escolares[]
+  tbl_niveles            tbl_niveles[]
+}
+
+model tbl_anios_escolares {
+  id                     Int                      @id @default(autoincrement())
+  id_colegio             Int
+  anio                   Int
+  fecha_inicio           DateTime                 @db.Date
+  fecha_fin              DateTime                 @db.Date
+  activo                 Boolean                  @default(false)
+  user_id_registration   Int?
+  date_time_registration DateTime?                @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?                @db.Timestamptz(6)
+  tbl_alertas            tbl_alertas[]
+  tbl_colegio            tbl_colegio              @relation(fields: [id_colegio], references: [id], onDelete: NoAction)
+  tbl_asistencia_dia     tbl_asistencia_dia[]
+  tbl_aulas              tbl_aulas[]
+  tbl_calendario_escolar tbl_calendario_escolar[]
+  tbl_comunicados        tbl_comunicados[]
+  tbl_entradas_agenda    tbl_entradas_agenda[]
+  tbl_eventos_asistencia tbl_eventos_asistencia[]
+  tbl_hilos_mensaje      tbl_hilos_mensaje[]
+  tbl_horarios_nivel     tbl_horarios_nivel[]
+  tbl_plantilla_pension  tbl_plantilla_pension[]
+
+  @@unique([id_colegio, anio], map: "uq_colegio_anio")
+}
+
+model tbl_calendario_escolar {
+  id                     Int                 @id @default(autoincrement())
+  id_anio_escolar        Int
+  fecha                  DateTime            @db.Date
+  es_dia_lectivo         Boolean             @default(true)
+  nota                   String?
+  user_id_registration   Int?
+  date_time_registration DateTime?           @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?           @db.Timestamptz(6)
+  tbl_anios_escolares    tbl_anios_escolares @relation(fields: [id_anio_escolar], references: [id], onDelete: Cascade)
+
+  @@unique([id_anio_escolar, fecha], map: "uq_anio_fecha")
+}
+
+model tbl_niveles {
+  id                     Int                  @id @default(autoincrement())
+  id_colegio             Int
+  nombre                 String               @db.VarChar(50)
+  user_id_registration   Int?
+  date_time_registration DateTime?            @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?            @db.Timestamptz(6)
+  tbl_grados             tbl_grados[]
+  tbl_horarios_nivel     tbl_horarios_nivel[]
+  tbl_colegio            tbl_colegio          @relation(fields: [id_colegio], references: [id], onDelete: NoAction)
+}
+
+model tbl_grados {
+  id                     Int         @id @default(autoincrement())
+  id_nivel               Int
+  nombre                 String      @db.VarChar(50)
+  orden                  Int         @default(0)
+  user_id_registration   Int?
+  date_time_registration DateTime?   @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?   @db.Timestamptz(6)
+  tbl_aulas              tbl_aulas[]
+  tbl_niveles            tbl_niveles @relation(fields: [id_nivel], references: [id], onDelete: NoAction)
+}
+
+model tbl_aulas {
+  id                     Int                      @id @default(autoincrement())
+  id_anio_escolar        Int
+  id_grado               Int
+  seccion                String                   @db.VarChar(10)
+  user_id_registration   Int?
+  date_time_registration DateTime?                @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?                @db.Timestamptz(6)
+  tbl_alumnos            tbl_alumnos[]
+  tbl_asignaciones_tutor tbl_asignaciones_tutor?
+  tbl_anios_escolares    tbl_anios_escolares      @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
+  tbl_grados             tbl_grados               @relation(fields: [id_grado], references: [id], onDelete: NoAction)
+  tbl_entradas_agenda    tbl_entradas_agenda[]
+  tbl_reportes_semanales tbl_reportes_semanales[]
+
+  @@unique([id_anio_escolar, id_grado, seccion], map: "uq_anio_grado_seccion")
+}
+
+model tbl_horarios_nivel {
+  id                      Int                 @id @default(autoincrement())
+  id_nivel                Int
+  id_anio_escolar         Int
+  hora_inicio             DateTime            @db.Time(6)
+  tolerancia_tardanza_min Int                 @default(15)
+  hora_limite_no_ingreso  DateTime            @db.Time(6)
+  user_id_registration    Int?
+  date_time_registration  DateTime?           @default(now()) @db.Timestamptz(6)
+  user_id_modification    Int?
+  date_time_modification  DateTime?           @db.Timestamptz(6)
+  tbl_anios_escolares     tbl_anios_escolares @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
+  tbl_niveles             tbl_niveles         @relation(fields: [id_nivel], references: [id], onDelete: NoAction)
+
+  @@unique([id_nivel, id_anio_escolar], map: "uq_horario_nivel_anio")
+}
+
+model tbl_asignaciones_tutor {
+  id                     Int          @id @default(autoincrement())
+  id_aula                Int          @unique(map: "uq_tutor_aula")
+  id_usuario_tutor       Int
+  user_id_registration   Int?
+  date_time_registration DateTime?    @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?    @db.Timestamptz(6)
+  tbl_aulas              tbl_aulas    @relation(fields: [id_aula], references: [id], onDelete: Cascade)
+  tbl_usuarios           tbl_usuarios @relation(fields: [id_usuario_tutor], references: [id], onDelete: NoAction)
+}
+
+model tbl_padres {
+  id                         Int                          @id @default(autoincrement())
+  dni                        String                       @unique @db.VarChar(20)
+  nombre_completo            String                       @db.VarChar(200)
+  celular                    String                       @db.VarChar(20)
+  id_usuario                 Int                          @unique
+  user_id_registration       Int?
+  date_time_registration     DateTime?                    @default(now()) @db.Timestamptz(6)
+  user_id_modification       Int?
+  date_time_modification     DateTime?                    @db.Timestamptz(6)
+  tbl_alertas                tbl_alertas[]
+  tbl_firmas_agenda          tbl_firmas_agenda[]
+  tbl_firmas_reporte_semanal tbl_firmas_reporte_semanal[]
+  tbl_usuarios               tbl_usuarios                 @relation(fields: [id_usuario], references: [id], onDelete: NoAction)
+  tbl_padres_alumnos         tbl_padres_alumnos[]
+  tbl_respuestas_agenda      tbl_respuestas_agenda[]
+}
+
+model tbl_alumnos {
+  id                     Int                      @id @default(autoincrement())
+  codigo_alumno          String                   @unique @db.VarChar(50)
+  dni                    String?                  @unique @db.VarChar(20)
+  nombre_completo        String                   @db.VarChar(200)
+  foto_url               String?
+  estado                 String                   @default("ACTIVO") @db.VarChar(20)
+  id_aula                Int
+  user_id_registration   Int?
+  date_time_registration DateTime?                @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?                @db.Timestamptz(6)
+  tbl_alertas            tbl_alertas[]
+  tbl_aulas              tbl_aulas                @relation(fields: [id_aula], references: [id], onDelete: NoAction)
+  tbl_asistencia_dia     tbl_asistencia_dia[]
+  tbl_carnets            tbl_carnets?
+  tbl_entradas_agenda    tbl_entradas_agenda[]
+  tbl_estado_pension     tbl_estado_pension[]
+  tbl_eventos_asistencia tbl_eventos_asistencia[]
+  tbl_hilos_mensaje      tbl_hilos_mensaje[]
+  tbl_padres_alumnos     tbl_padres_alumnos?
+  tbl_reportes_semanales tbl_reportes_semanales[]
+}
+
+model tbl_padres_alumnos {
+  id                     Int         @id @default(autoincrement())
+  id_padre               Int
+  id_alumno              Int         @unique
+  user_id_registration   Int?
+  date_time_registration DateTime?   @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?   @db.Timestamptz(6)
+  tbl_alumnos            tbl_alumnos @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
+  tbl_padres             tbl_padres  @relation(fields: [id_padre], references: [id], onDelete: NoAction)
+}
+
+model tbl_carnets {
+  id                     Int          @id @default(autoincrement())
+  id_alumno              Int          @unique
+  qr_token               String       @unique
+  version_carnet         Int          @default(1)
+  emitido_en             DateTime     @default(now()) @db.Timestamptz(6)
+  emitido_por            Int
+  user_id_registration   Int?
+  date_time_registration DateTime?    @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?    @db.Timestamptz(6)
+  tbl_usuarios           tbl_usuarios @relation(fields: [emitido_por], references: [id], onDelete: NoAction)
+  tbl_alumnos            tbl_alumnos  @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
+}
+
+model tbl_puntos_escaneo {
+  id                        Int                         @id @default(autoincrement())
+  nombre                    String                      @db.VarChar(100)
+  activo                    Boolean                     @default(true)
+  user_id_registration      Int?
+  date_time_registration    DateTime?                   @default(now()) @db.Timestamptz(6)
+  user_id_modification      Int?
+  date_time_modification    DateTime?                   @db.Timestamptz(6)
+  tbl_asignaciones_porteria tbl_asignaciones_porteria[]
+  tbl_eventos_asistencia    tbl_eventos_asistencia[]
+}
+
+model tbl_asignaciones_porteria {
+  id                     Int                @id @default(autoincrement())
+  id_usuario_porteria    Int                @unique
+  id_punto_escaneo       Int
+  user_id_registration   Int?
+  date_time_registration DateTime?          @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?          @db.Timestamptz(6)
+  tbl_puntos_escaneo     tbl_puntos_escaneo @relation(fields: [id_punto_escaneo], references: [id], onDelete: NoAction)
+  tbl_usuarios           tbl_usuarios       @relation(fields: [id_usuario_porteria], references: [id], onDelete: NoAction)
+}
+
+model tbl_eventos_asistencia {
+  id                      Int                  @id @default(autoincrement())
+  id_anio_escolar         Int
+  id_alumno               Int
+  fecha_evento            DateTime             @db.Date
+  hora_evento             DateTime             @db.Time(6)
+  fecha_hora_evento       DateTime             @db.Timestamptz(6)
+  tipo_evento             String               @db.VarChar(20)
+  metodo                  String               @db.VarChar(10)
+  id_punto_escaneo        Int
+  registrado_por          Int
+  user_id_registration    Int?
+  date_time_registration  DateTime?            @default(now()) @db.Timestamptz(6)
+  user_id_modification    Int?
+  date_time_modification  DateTime?            @db.Timestamptz(6)
+  checkin_asistencia_dia  tbl_asistencia_dia[] @relation("checkin_event")
+  checkout_asistencia_dia tbl_asistencia_dia[] @relation("checkout_event")
+  tbl_alumnos             tbl_alumnos          @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
+  tbl_anios_escolares     tbl_anios_escolares  @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
+  tbl_puntos_escaneo      tbl_puntos_escaneo   @relation(fields: [id_punto_escaneo], references: [id], onDelete: NoAction)
+  tbl_usuarios            tbl_usuarios         @relation(fields: [registrado_por], references: [id], onDelete: NoAction)
+}
+
+model tbl_asistencia_dia {
+  id                          Int                           @id @default(autoincrement())
+  id_anio_escolar             Int
+  id_alumno                   Int
+  fecha                       DateTime                      @db.Date
+  estado                      String                        @db.VarChar(20)
+  id_evento_checkin           Int?
+  id_evento_checkout          Int?
+  id_alerta_no_llego          Int?
+  user_id_registration        Int?
+  date_time_registration      DateTime?                     @default(now()) @db.Timestamptz(6)
+  user_id_modification        Int?
+  date_time_modification      DateTime?                     @db.Timestamptz(6)
+  tbl_alerta_no_llego         tbl_alertas?                  @relation(fields: [id_alerta_no_llego], references: [id])
+  tbl_alumnos                 tbl_alumnos                   @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
+  tbl_anios_escolares         tbl_anios_escolares           @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
+  tbl_evento_checkin          tbl_eventos_asistencia?       @relation("checkin_event", fields: [id_evento_checkin], references: [id])
+  tbl_evento_checkout         tbl_eventos_asistencia?       @relation("checkout_event", fields: [id_evento_checkout], references: [id])
+  tbl_correcciones_asistencia tbl_correcciones_asistencia[]
+
+  @@unique([id_alumno, fecha], map: "uq_alumno_fecha")
+}
+
+model tbl_correcciones_asistencia {
+  id                     Int                @id @default(autoincrement())
+  id_asistencia_dia      Int
+  campo_modificado       String
+  valor_anterior         String?
+  valor_nuevo            String
+  motivo                 String
+  corregido_por          Int
+  corregido_en           DateTime           @default(now()) @db.Timestamptz(6)
+  user_id_registration   Int?
+  date_time_registration DateTime?          @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?          @db.Timestamptz(6)
+  tbl_usuarios           tbl_usuarios       @relation(fields: [corregido_por], references: [id], onDelete: NoAction)
+  tbl_asistencia_dia     tbl_asistencia_dia @relation(fields: [id_asistencia_dia], references: [id], onDelete: NoAction)
+}
+
+model tbl_alertas {
+  id                     Int                  @id @default(autoincrement())
+  tipo                   String               @db.VarChar(30)
+  id_anio_escolar        Int
+  id_alumno              Int?
+  id_padre               Int?
+  fecha                  DateTime             @db.Date
+  estado                 String               @default("ABIERTA") @db.VarChar(20)
+  cerrada_en             DateTime?            @db.Timestamptz(6)
+  user_id_registration   Int?
+  date_time_registration DateTime?            @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?            @db.Timestamptz(6)
+  tbl_alumnos            tbl_alumnos?         @relation(fields: [id_alumno], references: [id])
+  tbl_anios_escolares    tbl_anios_escolares  @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
+  tbl_padres             tbl_padres?          @relation(fields: [id_padre], references: [id])
+  tbl_asistencia_dia     tbl_asistencia_dia[]
+}
+
+model tbl_plantillas_notificacion {
+  id                     Int       @id @default(autoincrement())
+  codigo                 String    @unique @db.VarChar(50)
+  titulo                 String    @db.VarChar(200)
+  cuerpo                 String
+  habilitada             Boolean   @default(true)
+  roles_destino          Json?
+  user_id_registration   Int?
+  date_time_registration DateTime? @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime? @db.Timestamptz(6)
+  tipo_entrega           String    @default("buzon") @db.VarChar(10)
+}
+
+model tbl_config_pension_reminder {
+  id                     Int       @id @default(autoincrement())
+  dia_inicio             Int       @default(25)
+  frecuencia_dias        Int       @default(5)
+  activa                 Boolean   @default(true)
+  user_id_registration   Int?
+  date_time_registration DateTime? @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime? @db.Timestamptz(6)
+}
+
+model tbl_notificaciones {
+  id                     Int          @id @default(autoincrement())
+  id_usuario             Int
+  codigo_plantilla       String?      @db.VarChar(50)
+  titulo                 String       @db.VarChar(200)
+  cuerpo                 String
+  fecha                  DateTime     @db.Date
+  leida                  Boolean      @default(false)
+  user_id_registration   Int?
+  date_time_registration DateTime?    @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?    @db.Timestamptz(6)
+  referencia_id          Int?
+  tbl_usuarios           tbl_usuarios @relation(fields: [id_usuario], references: [id], onDelete: NoAction)
+}
+
+model tbl_entradas_agenda {
+  id                     Int                     @id @default(autoincrement())
+  id_anio_escolar        Int
+  fecha                  DateTime                @db.Date
+  alcance                String                  @db.VarChar(10)
+  id_aula                Int?
+  id_alumno              Int?
+  contenido_texto        String
+  requiere_firma         Boolean                 @default(true)
+  publicado_por          Int
+  publicado_en           DateTime                @default(now()) @db.Timestamptz(6)
+  esta_publicado         Boolean                 @default(true)
+  user_id_registration   Int?
+  date_time_registration DateTime?               @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?               @db.Timestamptz(6)
+  tbl_alumnos            tbl_alumnos?            @relation(fields: [id_alumno], references: [id])
+  tbl_anios_escolares    tbl_anios_escolares     @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
+  tbl_aulas              tbl_aulas?              @relation(fields: [id_aula], references: [id])
+  tbl_usuarios           tbl_usuarios            @relation(fields: [publicado_por], references: [id], onDelete: NoAction)
+  tbl_firmas_agenda      tbl_firmas_agenda[]
+  tbl_respuestas_agenda  tbl_respuestas_agenda[]
+}
+
+model tbl_firmas_agenda {
+  id                     Int                 @id @default(autoincrement())
+  id_entrada_agenda      Int
+  id_padre               Int
+  firmado_en             DateTime            @default(now()) @db.Timestamptz(6)
+  user_id_registration   Int?
+  date_time_registration DateTime?           @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?           @db.Timestamptz(6)
+  tbl_entradas_agenda    tbl_entradas_agenda @relation(fields: [id_entrada_agenda], references: [id], onDelete: Cascade)
+  tbl_padres             tbl_padres          @relation(fields: [id_padre], references: [id], onDelete: NoAction)
+
+  @@unique([id_entrada_agenda, id_padre], map: "uq_firma_agenda_padre")
+}
+
+model tbl_respuestas_agenda {
+  id                     Int                 @id @default(autoincrement())
+  id_entrada_agenda      Int
+  id_padre               Int
+  mensaje                String
+  user_id_registration   Int?
+  date_time_registration DateTime?           @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?           @db.Timestamptz(6)
+  tbl_entradas_agenda    tbl_entradas_agenda @relation(fields: [id_entrada_agenda], references: [id], onDelete: Cascade)
+  tbl_padres             tbl_padres          @relation(fields: [id_padre], references: [id], onDelete: NoAction)
+}
+
+model tbl_reportes_semanales {
+  id                         Int                          @id @default(autoincrement())
+  inicio_semana              DateTime                     @db.Date
+  fin_semana                 DateTime                     @db.Date
+  alcance                    String                       @db.VarChar(10)
+  id_aula                    Int?
+  id_alumno                  Int?
+  contenido_json             Json?
+  publicado_por              Int
+  publicado_en               DateTime                     @default(now()) @db.Timestamptz(6)
+  requiere_firma             Boolean                      @default(true)
+  user_id_registration       Int?
+  date_time_registration     DateTime?                    @default(now()) @db.Timestamptz(6)
+  user_id_modification       Int?
+  date_time_modification     DateTime?                    @db.Timestamptz(6)
+  tbl_firmas_reporte_semanal tbl_firmas_reporte_semanal[]
+  tbl_alumnos                tbl_alumnos?                 @relation(fields: [id_alumno], references: [id])
+  tbl_aulas                  tbl_aulas?                   @relation(fields: [id_aula], references: [id])
+  tbl_usuarios               tbl_usuarios                 @relation(fields: [publicado_por], references: [id], onDelete: NoAction)
+}
+
+model tbl_firmas_reporte_semanal {
+  id                     Int                    @id @default(autoincrement())
+  id_reporte_semanal     Int
+  id_padre               Int
+  firmado_en             DateTime               @default(now()) @db.Timestamptz(6)
+  user_id_registration   Int?
+  date_time_registration DateTime?              @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?              @db.Timestamptz(6)
+  tbl_padres             tbl_padres             @relation(fields: [id_padre], references: [id], onDelete: NoAction)
+  tbl_reportes_semanales tbl_reportes_semanales @relation(fields: [id_reporte_semanal], references: [id], onDelete: Cascade)
+
+  @@unique([id_reporte_semanal, id_padre], map: "uq_firma_reporte_padre")
+}
+
+model tbl_hilos_mensaje {
+  id                     Int                 @id @default(autoincrement())
+  id_anio_escolar        Int
+  id_alumno              Int
+  asunto                 String              @db.VarChar(200)
+  creado_por             Int
+  user_id_registration   Int?
+  date_time_registration DateTime?           @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?           @db.Timestamptz(6)
+  tbl_usuarios           tbl_usuarios        @relation(fields: [creado_por], references: [id], onDelete: NoAction)
+  tbl_alumnos            tbl_alumnos         @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
+  tbl_anios_escolares    tbl_anios_escolares @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
+  tbl_mensajes           tbl_mensajes[]
+}
+
+model tbl_mensajes {
+  id                     Int               @id @default(autoincrement())
+  id_hilo                Int
+  id_usuario_emisor      Int
+  cuerpo                 String
+  adjunto_url            String?
+  adjunto_nombre         String?           @db.VarChar(255)
+  enviado_en             DateTime          @default(now()) @db.Timestamptz(6)
+  user_id_registration   Int?
+  date_time_registration DateTime?         @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?         @db.Timestamptz(6)
+  tbl_hilos_mensaje      tbl_hilos_mensaje @relation(fields: [id_hilo], references: [id], onDelete: Cascade)
+  tbl_usuarios           tbl_usuarios      @relation(fields: [id_usuario_emisor], references: [id], onDelete: NoAction)
+}
+
+model tbl_comunicados {
+  id                      Int                       @id @default(autoincrement())
+  id_anio_escolar         Int
+  creado_por              Int
+  prioridad               String                    @default("NORMAL") @db.VarChar(10)
+  titulo                  String                    @db.VarChar(200)
+  cuerpo                  String
+  tipo_audiencia          String                    @db.VarChar(20)
+  id_ref_audiencia        Int?
+  publicado_en            DateTime                  @default(now()) @db.Timestamptz(6)
+  esta_publicado          Boolean                   @default(true)
+  user_id_registration    Int?
+  date_time_registration  DateTime?                 @default(now()) @db.Timestamptz(6)
+  user_id_modification    Int?
+  date_time_modification  DateTime?                 @db.Timestamptz(6)
+  ids_alumnos             Json?
+  tbl_usuarios            tbl_usuarios              @relation(fields: [creado_por], references: [id], onDelete: NoAction)
+  tbl_anios_escolares     tbl_anios_escolares       @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
+  tbl_lecturas_comunicado tbl_lecturas_comunicado[]
+}
+
+model tbl_lecturas_comunicado {
+  id                     Int             @id @default(autoincrement())
+  id_comunicado          Int
+  id_usuario             Int
+  leido_en               DateTime        @default(now()) @db.Timestamptz(6)
+  user_id_registration   Int?
+  date_time_registration DateTime?       @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?       @db.Timestamptz(6)
+  tbl_comunicados        tbl_comunicados @relation(fields: [id_comunicado], references: [id], onDelete: Cascade)
+  tbl_usuarios           tbl_usuarios    @relation(fields: [id_usuario], references: [id], onDelete: NoAction)
+
+  @@unique([id_comunicado, id_usuario], map: "uq_comunicado_usuario")
+}
+
+model tbl_plantilla_pension {
+  id                     Int                  @id @default(autoincrement())
+  id_anio_escolar        Int
+  meses_json             Json
+  creado_por             Int
+  user_id_registration   Int?
+  date_time_registration DateTime?            @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?            @db.Timestamptz(6)
+  tbl_estado_pension     tbl_estado_pension[]
+  tbl_usuarios           tbl_usuarios         @relation(fields: [creado_por], references: [id], onDelete: NoAction)
+  tbl_anios_escolares    tbl_anios_escolares  @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
+}
+
+model tbl_estado_pension {
+  id                     Int                   @id @default(autoincrement())
+  id_plantilla           Int
+  id_alumno              Int
+  clave_mes              String                @db.VarChar(20)
+  actualizado_por        Int
+  user_id_registration   Int?
+  date_time_registration DateTime?             @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?             @db.Timestamptz(6)
+  estado                 String                @default("PENDIENTE") @db.VarChar(20)
+  monto_total            Decimal?              @db.Decimal(10, 2)
+  monto_pagado           Decimal               @default(0) @db.Decimal(10, 2)
+  tbl_usuarios           tbl_usuarios          @relation(fields: [actualizado_por], references: [id], onDelete: NoAction)
+  tbl_alumnos            tbl_alumnos           @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
+  tbl_plantilla_pension  tbl_plantilla_pension @relation(fields: [id_plantilla], references: [id], onDelete: NoAction)
+  tbl_pagos_pension      tbl_pagos_pension[]
+
+  @@unique([id_alumno, clave_mes], map: "uq_alumno_mes")
+}
+
+model tbl_pagos_pension {
+  id                     Int                @id @default(autoincrement())
+  id_estado_pension      Int
+  monto                  Decimal            @db.Decimal(10, 2)
+  fecha_pago             DateTime           @db.Date
+  observacion            String?            @db.VarChar(255)
+  registrado_por         Int
+  user_id_registration   Int?
+  date_time_registration DateTime?          @default(now()) @db.Timestamptz(6)
+  tbl_estado_pension     tbl_estado_pension @relation(fields: [id_estado_pension], references: [id], onDelete: Cascade)
+  tbl_usuarios           tbl_usuarios       @relation(fields: [registrado_por], references: [id], onDelete: NoAction)
+}
+
+model tbl_auditoria {
+  id               Int          @id @default(autoincrement())
+  id_usuario_actor Int
+  codigo_accion    String       @db.VarChar(100)
+  tipo_entidad     String       @db.VarChar(100)
+  id_entidad       Int?
+  marca_tiempo     DateTime     @default(now()) @db.Timestamptz(6)
+  resumen          String
+  meta_json        Json?
+  tbl_usuarios     tbl_usuarios @relation(fields: [id_usuario_actor], references: [id], onDelete: NoAction)
+}
+
+model tbl_notificaciones_personalizadas {
+  id                                    Int                                     @id @default(autoincrement())
+  titulo                                String                                  @db.VarChar(200)
+  cuerpo                                String
+  tipo_entrega                          String                                  @db.VarChar(10)
+  tipo_audiencia                        String                                  @db.VarChar(20)
+  id_ref_audiencia                      Int?
+  total_destinatarios                   Int                                     @default(0)
+  creado_por                            Int
+  activa                                Boolean                                 @default(true)
+  user_id_registration                  Int?
+  date_time_registration                DateTime?                               @default(now()) @db.Timestamptz(6)
+  user_id_modification                  Int?
+  date_time_modification                DateTime?                               @db.Timestamptz(6)
+  estado                                String                                  @default("ENVIADA") @db.VarChar(15)
+  fecha_programada                      DateTime?                               @db.Date
+  tbl_destinatarios_notif_personalizada tbl_destinatarios_notif_personalizada[]
+  usuario_creador                       tbl_usuarios                            @relation("notif_personal_creador", fields: [creado_por], references: [id], onDelete: NoAction)
+}
+
+model tbl_destinatarios_notif_personalizada {
+  id                                Int                               @id @default(autoincrement())
+  id_notif_personalizada            Int
+  id_usuario                        Int
+  aceptada_modal                    Boolean                           @default(false)
+  fecha_lectura_buzon               DateTime?                         @db.Timestamptz(6)
+  fecha_aceptacion_modal            DateTime?                         @db.Timestamptz(6)
+  user_id_registration              Int?
+  date_time_registration            DateTime?                         @default(now()) @db.Timestamptz(6)
+  user_id_modification              Int?
+  date_time_modification            DateTime?                         @db.Timestamptz(6)
+  tbl_notificaciones_personalizadas tbl_notificaciones_personalizadas @relation(fields: [id_notif_personalizada], references: [id], onDelete: Cascade)
+  tbl_usuarios                      tbl_usuarios                      @relation(fields: [id_usuario], references: [id], onDelete: NoAction)
+
+  @@unique([id_notif_personalizada, id_usuario], map: "uq_notif_personal_usuario")
+}
