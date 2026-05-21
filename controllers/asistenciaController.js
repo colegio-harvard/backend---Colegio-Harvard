@@ -38,8 +38,12 @@ const registrarEvento = async (req, res) => {
     if (asignacion) {
       idPuntoEscaneo = asignacion.id_punto_escaneo;
     } else if (['SUPER_ADMIN', 'ADMIN'].includes(req.user.rol_codigo)) {
-      const puntoDefault = await prisma.tbl_puntos_escaneo.findFirst({ where: { activo: true }, orderBy: { id: 'asc' } });
-      if (!puntoDefault) return res.status(400).json({ error: 'No hay punto de escaneo activo configurado' });
+      let puntoDefault = await prisma.tbl_puntos_escaneo.findFirst({ where: { activo: true }, orderBy: { id: 'asc' } });
+      if (!puntoDefault) {
+        puntoDefault = await prisma.tbl_puntos_escaneo.create({
+          data: { nombre: 'Punto principal', activo: true, user_id_registration: req.user.id },
+        });
+      }
       idPuntoEscaneo = puntoDefault.id;
     } else {
       return res.status(403).json({ error: 'No tiene punto de escaneo asignado' });
@@ -626,5 +630,6 @@ const dashboardAdmin = async (req, res) => {
 };
 
 module.exports = { registrarEvento, calendarioPadre, obtenerHijosPadre, asistenciaHoyTutor, obtenerAulasTutor, asistenciaGlobal, exportarExcel, corregirAsistencia, historialPorteria, dashboardAdmin };
+
 
 
