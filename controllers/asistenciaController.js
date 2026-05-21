@@ -5,6 +5,74 @@ const { emitToUser, emitToAula } = require('../utils/socketEmitter');
 const { enviarNotificacion } = require('../utils/notifUtils');
 const { utcNow, toUtcIso, todayLima, currentLimaTimeMs, timeFieldToMs, parseDateOnly } = require('../utils/dateUtils');
 
+const normalizarMesesPlantilla = (mesesRaw) => {
+  const meses = Array.isArray(mesesRaw) ? mesesRaw : [];
+  const seen = new Set();
+  const normalized = [];
+
+  for (const m of meses) {
+    const clave = m.clave || m.clave_mes || m.mes || '';
+    const nombre = m.nombre || m.label || clave;
+    const isOldComposite = m.mes_base || (m.tipo !== 'personalizado' && /^[A-Z]{3}_\d+$/.test(clave));
+    const claveFinal = isOldComposite ? (m.mes_base || clave.replace(/_\d+$/, '')) : clave;
+
+    if (claveFinal && !seen.has(claveFinal)) {
+      seen.add(claveFinal);
+      normalized.push({
+        clave: claveFinal,
+        nombre: nombre || claveFinal,
+        tipo: m.tipo || 'mes',
+        comentario: m.comentario || '',
+      });
+    }
+  }
+
+  return normalized;
+};
+
+const obtenerPensionesAlumno = async (idAlumno, idAnioEscolar) => {
+  const [plantilla, estados] = await Promise.all([
+    prisma.tbl_plantilla_pension.findFirst({ where: { id_anio_escolar: idAnioEscolar } }),
+    prisma.tbl_estado_pension.findMany({
+      where: { id_alumno: idAlumno },
+      orderBy: { clave_mes: 'asc' },
+    }),
+  ]);
+
+  const estadosMap = new Map(estados.map(e => [e.clave_mes, e]));
+  const mesesPlantilla = normalizarMesesPlantilla(plantilla?.meses_json);
+  const clavesExtras = estados
+    .map(e => e.clave_mes)
+    .filter(clave => !mesesPlantilla.some(m => m.clave === clave));
+
+  const meses = [
+    ...mesesPlantilla,
+    ...clavesExtras.map(clave => ({ clave, nombre: clave, tipo: 'mes', comentario: '' })),
+  ].map(m => {
+    const estado = estadosMap.get(m.clave);
+    const montoTotal = estado?.monto_total ? Number(estado.monto_total) : null;
+    const montoPagado = estado ? Number(estado.monto_pagado) : 0;
+    return {
+      clave: m.clave,
+      nombre: m.nombre,
+      comentario: m.comentario || '',
+      estado: estado?.estado || 'PENDIENTE',
+      monto_total: montoTotal,
+      monto_pagado: montoPagado,
+      saldo: montoTotal !== null ? Math.max(montoTotal - montoPagado, 0) : null,
+    };
+  });
+
+  return {
+    meses,
+    resumen: {
+      pagados: meses.filter(m => m.estado === 'PAGADO').length,
+      parciales: meses.filter(m => m.estado === 'PAGO_PARCIAL').length,
+      pendientes: meses.filter(m => m.estado === 'PENDIENTE').length,
+    },
+  };
+};
+
 // FLW-06/07: Registro automatico de ingreso/salida (QR o PIN)
 const registrarEvento = async (req, res) => {
   const { qr_token, codigo_alumno } = req.body;
@@ -143,6 +211,8 @@ const registrarEvento = async (req, res) => {
       hora: toUtcIso(ahora),
     });
 
+    const pensiones = await obtenerPensionesAlumno(alumno.id, anioActivo.id);
+
     res.json({
       data: {
         tipo_evento: tipoEvento,
@@ -151,6 +221,9 @@ const registrarEvento = async (req, res) => {
         aula: alumno.tbl_aulas.seccion,
         fecha_hora: toUtcIso(ahora),
         metodo,
+        codigo_alumno: alumno.codigo_alumno,
+        dni: alumno.dni,
+        pensiones,
       },
     });
   } catch (error) {
@@ -301,36 +374,6 @@ const calendarioPadre = async (req, res) => {
     const asistencias = asistenciasRaw.filter(a => estaEnMes(a.fecha, mes, anio));
     const eventos = eventosRaw.filter(e => estaEnMes(e.fecha_evento, mes, anio));
     const alertasMes = alertasRaw.filter(a => estaEnMes(a.fecha, mes, anio) || estaEnMes(a.date_time_registration, mes, anio));
-    if (esPadre) {
-      console.info('DEBUG_ASISTENCIA_PADRE', {
-        userId: req.user.id,
-        mes,
-        anio,
-        idAlumnoSolicitado: idAlumnoNum,
-        idsConsulta,
-        raw: {
-          asistencias: asistenciasRaw.length,
-          eventos: eventosRaw.length,
-          alertas: alertasRaw.length,
-        },
-        filtrado: {
-          asistencias: asistencias.length,
-          eventos: eventos.length,
-          alertas: alertasMes.length,
-        },
-        primerasFechas: {
-          asistencias: asistenciasRaw.slice(0, 5).map(a => fechaKey(a.fecha)),
-          eventos: eventosRaw.slice(0, 5).map(e => fechaKey(e.fecha_evento)),
-          alertas: alertasRaw.slice(0, 5).map(a => ({
-            fecha: fechaKey(a.fecha),
-            registro: fechaKey(a.date_time_registration),
-            tipo: a.tipo,
-            estado: a.estado,
-          })),
-        },
-      });
-    }
-
     const asistenciasPorFecha = new Map();
     for (const asistencia of asistencias) {
       asistenciasPorFecha.set(fechaKey(asistencia.fecha), asistencia);
