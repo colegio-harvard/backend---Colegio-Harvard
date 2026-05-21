@@ -198,6 +198,7 @@ const calendarioPadre = async (req, res) => {
     }
 
     let hijos = [];
+    let idsHijosPadre = [];
     if (req.user.rol_codigo === 'PADRE') {
       const padre = await prisma.tbl_padres.findUnique({ where: { id_usuario: req.user.id } });
       if (!padre) return res.status(404).json({ error: 'Padre no encontrado' });
@@ -248,6 +249,7 @@ const calendarioPadre = async (req, res) => {
       });
 
       const idsHijos = hijos.map(h => h.id);
+      idsHijosPadre = idsHijos;
       const solicitado = id_alumno ? parseInt(id_alumno, 10) : null;
       id_alumno = idsHijos.includes(solicitado) ? solicitado : idsHijos[0];
     } else if (!id_alumno) {
@@ -261,9 +263,13 @@ const calendarioPadre = async (req, res) => {
     if (!Number.isInteger(idAlumnoNum)) {
       return res.status(400).json({ error: 'id_alumno invalido' });
     }
+    const idsConsulta = req.user.rol_codigo === 'PADRE' && idsHijosPadre.length > 0
+      ? idsHijosPadre
+      : [idAlumnoNum];
+    const fechaFinDia = new Date(`${anio}-${String(mes).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`);
 
     const asistencias = await prisma.tbl_asistencia_dia.findMany({
-      where: { id_alumno: idAlumnoNum, fecha: { gte: fechaInicio, lte: fechaFin } },
+      where: { id_alumno: { in: idsConsulta }, fecha: { gte: fechaInicio, lte: fechaFin } },
       include: {
         tbl_evento_checkin: { select: { hora_evento: true, metodo: true, id_punto_escaneo: true, tbl_puntos_escaneo: { select: { nombre: true } } } },
         tbl_evento_checkout: { select: { hora_evento: true } },
@@ -272,18 +278,21 @@ const calendarioPadre = async (req, res) => {
     });
 
     const eventos = await prisma.tbl_eventos_asistencia.findMany({
-      where: { id_alumno: idAlumnoNum, fecha_evento: { gte: fechaInicio, lte: fechaFin } },
+      where: { id_alumno: { in: idsConsulta }, fecha_evento: { gte: fechaInicio, lte: fechaFin } },
       include: { tbl_puntos_escaneo: { select: { nombre: true } } },
       orderBy: [{ fecha_evento: 'asc' }, { fecha_hora_evento: 'asc' }],
     });
 
     const alertasNoLlego = await prisma.tbl_alertas.findMany({
       where: {
-        id_alumno: idAlumnoNum,
+        id_alumno: { in: idsConsulta },
         tipo: 'NO_LLEGO',
-        fecha: { gte: fechaInicio, lte: fechaFin },
+        OR: [
+          { fecha: { gte: fechaInicio, lte: fechaFin } },
+          { date_time_registration: { gte: fechaInicio, lte: fechaFinDia } },
+        ],
       },
-      orderBy: { fecha: 'asc' },
+      orderBy: [{ fecha: 'asc' }, { date_time_registration: 'asc' }],
     });
 
     const asistenciasPorFecha = new Map();
@@ -303,7 +312,12 @@ const calendarioPadre = async (req, res) => {
 
     const alertasPorFecha = new Map();
     for (const alerta of alertasNoLlego) {
-      alertasPorFecha.set(fechaKey(alerta.fecha), alerta);
+      const keyFecha = fechaKey(alerta.fecha);
+      const keyCreacion = fechaKey(alerta.date_time_registration);
+      const key = keyFecha && keyFecha >= fechaKey(fechaInicio) && keyFecha <= fechaKey(fechaFin)
+        ? keyFecha
+        : keyCreacion;
+      alertasPorFecha.set(key, alerta);
     }
 
     // Construir calendario con dias del mes
