@@ -272,25 +272,24 @@ const calendarioPadre = async (req, res) => {
     const esPadre = req.user.rol_codigo === 'PADRE';
     const idsConsulta = esPadre && idsHijosPadre.length > 0 ? idsHijosPadre : [idAlumnoNum];
 
-    const asistenciasRaw = await prisma.tbl_asistencia_dia.findMany({
-      where: {
-        id_alumno: { in: idsConsulta },
-        ...(esPadre ? {} : { fecha: { gte: fechaInicio, lte: fechaFin } }),
-      },
-      include: {
-        tbl_evento_checkin: { select: { hora_evento: true, metodo: true } },
-        tbl_evento_checkout: { select: { hora_evento: true } },
-      },
-      orderBy: { fecha: 'asc' },
-    });
+    const idsSql = idsConsulta.map(Number).filter(Number.isInteger).join(',');
+    const asistenciasRaw = idsSql
+      ? await prisma.$queryRawUnsafe(`
+          SELECT id, id_alumno, fecha, estado, id_evento_checkin, id_evento_checkout, id_alerta_no_llego
+          FROM tbl_asistencia_dia
+          WHERE id_alumno IN (${idsSql})
+          ORDER BY fecha ASC
+        `)
+      : [];
 
-    const eventosRaw = await prisma.tbl_eventos_asistencia.findMany({
-      where: {
-        id_alumno: { in: idsConsulta },
-        ...(esPadre ? {} : { fecha_evento: { gte: fechaInicio, lte: fechaFin } }),
-      },
-      orderBy: [{ fecha_evento: 'asc' }, { fecha_hora_evento: 'asc' }],
-    });
+    const eventosRaw = idsSql
+      ? await prisma.$queryRawUnsafe(`
+          SELECT id, id_alumno, fecha_evento, hora_evento, fecha_hora_evento, tipo_evento, metodo
+          FROM tbl_eventos_asistencia
+          WHERE id_alumno IN (${idsSql})
+          ORDER BY fecha_evento ASC, fecha_hora_evento ASC
+        `)
+      : [];
 
     const alertasRaw = await prisma.tbl_alertas.findMany({
       where: {
@@ -337,6 +336,11 @@ const calendarioPadre = async (req, res) => {
       asistenciasPorFecha.set(fechaKey(asistencia.fecha), asistencia);
     }
 
+    const eventosPorId = new Map();
+    for (const evento of eventos) {
+      eventosPorId.set(evento.id, evento);
+    }
+
     const eventosPorFecha = new Map();
     for (const evento of eventos) {
       const key = fechaKey(evento.fecha_evento);
@@ -375,8 +379,8 @@ const calendarioPadre = async (req, res) => {
       const alertaDia = alertasPorFecha.get(fechaDia);
 
       if (asistenciaDia) {
-        const checkin = asistenciaDia.tbl_evento_checkin || eventoDia?.checkin || null;
-        const checkout = asistenciaDia.tbl_evento_checkout || eventoDia?.checkout || null;
+        const checkin = eventosPorId.get(asistenciaDia.id_evento_checkin) || eventoDia?.checkin || null;
+        const checkout = eventosPorId.get(asistenciaDia.id_evento_checkout) || eventoDia?.checkout || null;
         diasCalendario.push({
           dia: d,
           fecha: fechaDia,
