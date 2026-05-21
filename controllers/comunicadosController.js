@@ -102,7 +102,7 @@ const listar = async (req, res) => {
         tbl_usuarios: { select: { nombres: true } },
         tbl_lecturas_comunicado: {
           where: { id_usuario: req.user.id },
-          select: { id: true },
+          select: { id: true, id_usuario: true },
         },
         _count: { select: { tbl_lecturas_comunicado: true } },
       },
@@ -147,9 +147,7 @@ const listar = async (req, res) => {
       id_ref_audiencia: c.id_ref_audiencia,
       ids_alumnos: c.ids_alumnos || null,
       creador: c.tbl_usuarios?.nombres || null,
-      leido: c.tbl_lecturas_comunicado.some(
-  l => l.id_usuario === req.user.id
-),
+      leido: c.tbl_lecturas_comunicado.length > 0,
       total_lecturas: c._count.tbl_lecturas_comunicado,
       publicado_en: c.publicado_en,
       date_time_registration: c.date_time_registration,
@@ -194,7 +192,7 @@ const listarPorAlumno = async (req, res) => {
         tbl_usuarios: { select: { nombres: true } },
         tbl_lecturas_comunicado: {
           where: { id_usuario: req.user.id },
-          select: { id: true },
+          select: { id: true, id_usuario: true },
         },
         _count: { select: { tbl_lecturas_comunicado: true } },
       },
@@ -244,3 +242,6 @@ const marcarLeido = async (req, res) => {
 };
 
 module.exports = { crear, listar, listarPorAlumno, marcarLeido };
+
+
+
