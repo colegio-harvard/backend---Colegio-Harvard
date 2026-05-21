@@ -293,17 +293,16 @@ const calendarioPadre = async (req, res) => {
       orderBy: [{ fecha_evento: 'asc' }, { fecha_hora_evento: 'asc' }],
     });
 
-    const alertasNoLlegoRaw = await prisma.tbl_alertas.findMany({
+    const alertasRaw = await prisma.tbl_alertas.findMany({
       where: {
         id_alumno: { in: idsConsulta },
-        tipo: 'NO_LLEGO',
         ...(esPadre ? {} : { fecha: { gte: fechaInicio, lte: fechaFin } }),
       },
       orderBy: [{ fecha: 'asc' }, { date_time_registration: 'asc' }],
     });
     const asistencias = asistenciasRaw.filter(a => estaEnMes(a.fecha, mes, anio));
     const eventos = eventosRaw.filter(e => estaEnMes(e.fecha_evento, mes, anio));
-    const alertasNoLlego = alertasNoLlegoRaw.filter(a => estaEnMes(a.fecha, mes, anio) || estaEnMes(a.date_time_registration, mes, anio));
+    const alertasMes = alertasRaw.filter(a => estaEnMes(a.fecha, mes, anio) || estaEnMes(a.date_time_registration, mes, anio));
 
     const asistenciasPorFecha = new Map();
     for (const asistencia of asistencias) {
@@ -321,7 +320,7 @@ const calendarioPadre = async (req, res) => {
     }
 
     const alertasPorFecha = new Map();
-    for (const alerta of alertasNoLlego) {
+    for (const alerta of alertasMes) {
       const keyFecha = fechaKey(alerta.fecha);
       const keyCreacion = fechaKey(alerta.date_time_registration);
       const key = keyFecha && keyFecha >= fechaKey(fechaInicio) && keyFecha <= fechaKey(fechaFin)
@@ -394,6 +393,12 @@ const calendarioPadre = async (req, res) => {
       id_alumno: idAlumnoNum,
       alumno: hijos.find(h => h.id === idAlumnoNum) || null,
       hijos,
+      debug: {
+        idsConsulta,
+        asistencias: asistencias.length,
+        eventos: eventos.length,
+        alertas: alertasMes.length,
+      },
     });
   } catch (error) {
     console.error('Error calendario padre:', error);
