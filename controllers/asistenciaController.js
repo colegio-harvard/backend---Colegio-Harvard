@@ -180,6 +180,12 @@ const construirCalendarioVacio = (mes, anio) => {
   return diasCalendario;
 };
 
+const fechaKey = (fecha) => {
+  if (!fecha) return null;
+  if (fecha instanceof Date) return fecha.toISOString().slice(0, 10);
+  return String(fecha).slice(0, 10);
+};
+
 // FLW-10: Vista padre - asistencia calendario mensual (auto-detecta hijos)
 const calendarioPadre = async (req, res) => {
   let { id_alumno, mes, anio } = req.query;
@@ -280,18 +286,24 @@ const calendarioPadre = async (req, res) => {
       orderBy: { fecha: 'asc' },
     });
 
-    const eventosPorDia = new Map();
-    for (const evento of eventos) {
-      const dia = evento.fecha_evento.getUTCDate();
-      if (!eventosPorDia.has(dia)) eventosPorDia.set(dia, { checkin: null, checkout: null });
-      const grupo = eventosPorDia.get(dia);
-      if (evento.tipo_evento === 'CHECKIN' && !grupo.checkin) grupo.checkin = evento;
-      if (evento.tipo_evento === 'CHECKOUT' && !grupo.checkout) grupo.checkout = evento;
+    const asistenciasPorFecha = new Map();
+    for (const asistencia of asistencias) {
+      asistenciasPorFecha.set(fechaKey(asistencia.fecha), asistencia);
     }
 
-    const alertasPorDia = new Map();
+    const eventosPorFecha = new Map();
+    for (const evento of eventos) {
+      const key = fechaKey(evento.fecha_evento);
+      const tipo = String(evento.tipo_evento || '').trim().toUpperCase();
+      if (!eventosPorFecha.has(key)) eventosPorFecha.set(key, { checkin: null, checkout: null });
+      const grupo = eventosPorFecha.get(key);
+      if (tipo === 'CHECKIN' && !grupo.checkin) grupo.checkin = evento;
+      if (tipo === 'CHECKOUT' && !grupo.checkout) grupo.checkout = evento;
+    }
+
+    const alertasPorFecha = new Map();
     for (const alerta of alertasNoLlego) {
-      alertasPorDia.set(alerta.fecha.getUTCDate(), alerta);
+      alertasPorFecha.set(fechaKey(alerta.fecha), alerta);
     }
 
     // Construir calendario con dias del mes
@@ -307,24 +319,23 @@ const calendarioPadre = async (req, res) => {
 
     for (let d = 1; d <= diasEnMes; d++) {
       const fechaDia = `${anio}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      const asistenciaDia = asistencias.find(a => {
-        const f = new Date(a.fecha);
-        return f.getUTCDate() === d;
-      });
-      const eventoDia = eventosPorDia.get(d);
-      const alertaDia = alertasPorDia.get(d);
+      const asistenciaDia = asistenciasPorFecha.get(fechaDia);
+      const eventoDia = eventosPorFecha.get(fechaDia);
+      const alertaDia = alertasPorFecha.get(fechaDia);
 
       if (asistenciaDia) {
+        const checkin = asistenciaDia.tbl_evento_checkin || eventoDia?.checkin || null;
+        const checkout = asistenciaDia.tbl_evento_checkout || eventoDia?.checkout || null;
         diasCalendario.push({
           dia: d,
           fecha: fechaDia,
           estado: asistenciaDia.estado,
           id_alerta_no_llego: asistenciaDia.id_alerta_no_llego || alertaDia?.id || null,
-          hora_ingreso: asistenciaDia.tbl_evento_checkin?.hora_evento || null,
-          metodo_ingreso: asistenciaDia.tbl_evento_checkin?.metodo || null,
-          punto_escaneo: asistenciaDia.tbl_evento_checkin?.tbl_puntos_escaneo?.nombre || null,
-          hora_salida: asistenciaDia.tbl_evento_checkout?.hora_evento || null,
-          salida_no_registrada: !!asistenciaDia.id_evento_checkin && !asistenciaDia.id_evento_checkout,
+          hora_ingreso: checkin?.hora_evento || null,
+          metodo_ingreso: checkin?.metodo || null,
+          punto_escaneo: checkin?.tbl_puntos_escaneo?.nombre || null,
+          hora_salida: checkout?.hora_evento || null,
+          salida_no_registrada: !!checkin && !checkout,
         });
       } else if (eventoDia?.checkin) {
         diasCalendario.push({
