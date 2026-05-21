@@ -177,6 +177,15 @@ const listarPorAlumno = async (req, res) => {
     const idGrado = alumno.tbl_aulas?.id_grado;
     const idNivel = alumno.tbl_aulas?.tbl_grados?.id_nivel;
 
+    let lecturaUserIds = [req.user.id];
+    if (req.user.rol_codigo !== 'PADRE') {
+      const vinculosLectura = await prisma.tbl_padres_alumnos.findMany({
+        where: { id_alumno },
+        include: { tbl_padres: { select: { id_usuario: true } } },
+      });
+      lecturaUserIds = vinculosLectura.map(v => v.tbl_padres?.id_usuario).filter(Boolean);
+    }
+
     const comunicados = await prisma.tbl_comunicados.findMany({
       where: {
         esta_publicado: true,
@@ -191,7 +200,7 @@ const listarPorAlumno = async (req, res) => {
       include: {
         tbl_usuarios: { select: { nombres: true } },
         tbl_lecturas_comunicado: {
-          where: { id_usuario: req.user.id },
+          where: { id_usuario: { in: lecturaUserIds.length ? lecturaUserIds : [-1] } },
           select: { id: true, id_usuario: true },
         },
         _count: { select: { tbl_lecturas_comunicado: true } },
@@ -242,6 +251,10 @@ const marcarLeido = async (req, res) => {
 };
 
 module.exports = { crear, listar, listarPorAlumno, marcarLeido };
+
+
+
+
 
 
 
