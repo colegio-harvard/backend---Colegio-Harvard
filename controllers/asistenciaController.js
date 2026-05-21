@@ -278,7 +278,7 @@ const calendarioPadre = async (req, res) => {
         ...(esPadre ? {} : { fecha: { gte: fechaInicio, lte: fechaFin } }),
       },
       include: {
-        tbl_evento_checkin: { select: { hora_evento: true, metodo: true, id_punto_escaneo: true, tbl_puntos_escaneo: { select: { nombre: true } } } },
+        tbl_evento_checkin: { select: { hora_evento: true, metodo: true } },
         tbl_evento_checkout: { select: { hora_evento: true } },
       },
       orderBy: { fecha: 'asc' },
@@ -289,7 +289,6 @@ const calendarioPadre = async (req, res) => {
         id_alumno: { in: idsConsulta },
         ...(esPadre ? {} : { fecha_evento: { gte: fechaInicio, lte: fechaFin } }),
       },
-      include: { tbl_puntos_escaneo: { select: { nombre: true } } },
       orderBy: [{ fecha_evento: 'asc' }, { fecha_hora_evento: 'asc' }],
     });
 
@@ -385,7 +384,7 @@ const calendarioPadre = async (req, res) => {
           id_alerta_no_llego: asistenciaDia.id_alerta_no_llego || alertaDia?.id || null,
           hora_ingreso: checkin?.hora_evento || null,
           metodo_ingreso: checkin?.metodo || null,
-          punto_escaneo: checkin?.tbl_puntos_escaneo?.nombre || null,
+          punto_escaneo: null,
           hora_salida: checkout?.hora_evento || null,
           salida_no_registrada: !!checkin && !checkout,
         });
@@ -396,7 +395,7 @@ const calendarioPadre = async (req, res) => {
           estado: 'PRESENTE',
           hora_ingreso: eventoDia.checkin.hora_evento || null,
           metodo_ingreso: eventoDia.checkin.metodo || null,
-          punto_escaneo: eventoDia.checkin.tbl_puntos_escaneo?.nombre || null,
+          punto_escaneo: null,
           hora_salida: eventoDia.checkout?.hora_evento || null,
           salida_no_registrada: !!eventoDia.checkin && !eventoDia.checkout,
         });
