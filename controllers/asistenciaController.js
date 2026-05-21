@@ -163,21 +163,36 @@ const registrarEvento = async (req, res) => {
 const calendarioPadre = async (req, res) => {
   let { id_alumno, mes, anio } = req.query;
   try {
-    // Auto-detectar hijo si no se envia id_alumno
-    if (!id_alumno) {
+    const now = todayLima().iso.split('-');
+    mes = parseInt(mes || now[1], 10);
+    anio = parseInt(anio || now[0], 10);
+    if (!Number.isInteger(mes) || mes < 1 || mes > 12 || !Number.isInteger(anio)) {
+      return res.status(400).json({ error: 'Mes o anio invalido' });
+    }
+
+    if (req.user.rol_codigo === 'PADRE') {
       const padre = await prisma.tbl_padres.findUnique({ where: { id_usuario: req.user.id } });
       if (!padre) return res.status(404).json({ error: 'Padre no encontrado' });
-      const vinculos = await prisma.tbl_padres_alumnos.findMany({ where: { id_padre: padre.id }, select: { id_alumno: true } });
+      const vinculos = await prisma.tbl_padres_alumnos.findMany({
+        where: { id_padre: padre.id },
+        select: { id_alumno: true },
+        orderBy: { id: 'asc' },
+      });
       if (vinculos.length === 0) return res.json({ data: [], hijos: [] });
-      id_alumno = vinculos[0].id_alumno;
+      const idsHijos = vinculos.map(v => v.id_alumno);
+      const solicitado = parseInt(id_alumno, 10);
+      id_alumno = idsHijos.includes(solicitado) ? solicitado : idsHijos[0];
+    } else if (!id_alumno) {
+      return res.status(400).json({ error: 'Debe enviar id_alumno' });
     }
 
     const fechaInicio = parseDateOnly(`${anio}-${String(mes).padStart(2, '0')}-01`);
-    const lastDay = new Date(Date.UTC(parseInt(anio), parseInt(mes), 0)).getUTCDate();
+    const lastDay = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
     const fechaFin = parseDateOnly(`${anio}-${String(mes).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`);
+    const idAlumnoNum = parseInt(id_alumno, 10);
 
     const asistencias = await prisma.tbl_asistencia_dia.findMany({
-      where: { id_alumno: parseInt(id_alumno), fecha: { gte: fechaInicio, lte: fechaFin } },
+      where: { id_alumno: idAlumnoNum, fecha: { gte: fechaInicio, lte: fechaFin } },
       include: {
         tbl_evento_checkin: { select: { hora_evento: true, metodo: true, id_punto_escaneo: true, tbl_puntos_escaneo: { select: { nombre: true } } } },
         tbl_evento_checkout: { select: { hora_evento: true } },
@@ -185,9 +200,24 @@ const calendarioPadre = async (req, res) => {
       orderBy: { fecha: 'asc' },
     });
 
+    const eventos = asistencias.length > 0 ? [] : await prisma.tbl_eventos_asistencia.findMany({
+      where: { id_alumno: idAlumnoNum, fecha_evento: { gte: fechaInicio, lte: fechaFin } },
+      include: { tbl_puntos_escaneo: { select: { nombre: true } } },
+      orderBy: [{ fecha_evento: 'asc' }, { fecha_hora_evento: 'asc' }],
+    });
+
+    const eventosPorDia = new Map();
+    for (const evento of eventos) {
+      const dia = evento.fecha_evento.getUTCDate();
+      if (!eventosPorDia.has(dia)) eventosPorDia.set(dia, { checkin: null, checkout: null });
+      const grupo = eventosPorDia.get(dia);
+      if (evento.tipo_evento === 'CHECKIN' && !grupo.checkin) grupo.checkin = evento;
+      if (evento.tipo_evento === 'CHECKOUT' && !grupo.checkout) grupo.checkout = evento;
+    }
+
     // Construir calendario con dias del mes
-    const diasEnMes = new Date(Date.UTC(parseInt(anio), parseInt(mes), 0)).getUTCDate();
-    const primerDia = new Date(Date.UTC(parseInt(anio), parseInt(mes) - 1, 1)).getUTCDay();
+    const diasEnMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+    const primerDia = new Date(Date.UTC(anio, mes - 1, 1)).getUTCDay();
     const diasCalendario = [];
 
     // Rellenar dias vacios antes del primer dia
@@ -202,6 +232,7 @@ const calendarioPadre = async (req, res) => {
         const f = new Date(a.fecha);
         return f.getUTCDate() === d;
       });
+      const eventoDia = eventosPorDia.get(d);
 
       if (asistenciaDia) {
         diasCalendario.push({
@@ -213,6 +244,17 @@ const calendarioPadre = async (req, res) => {
           punto_escaneo: asistenciaDia.tbl_evento_checkin?.tbl_puntos_escaneo?.nombre || null,
           hora_salida: asistenciaDia.tbl_evento_checkout?.hora_evento || null,
           salida_no_registrada: asistenciaDia.id_evento_checkin && !asistenciaDia.id_evento_checkout,
+        });
+      } else if (eventoDia?.checkin) {
+        diasCalendario.push({
+          dia: d,
+          fecha: fechaDia,
+          estado: 'PRESENTE',
+          hora_ingreso: eventoDia.checkin.hora_evento || null,
+          metodo_ingreso: eventoDia.checkin.metodo || null,
+          punto_escaneo: eventoDia.checkin.tbl_puntos_escaneo?.nombre || null,
+          hora_salida: eventoDia.checkout?.hora_evento || null,
+          salida_no_registrada: !!eventoDia.checkin && !eventoDia.checkout,
         });
       } else {
         diasCalendario.push({ dia: d, fecha: fechaDia, estado: null });
