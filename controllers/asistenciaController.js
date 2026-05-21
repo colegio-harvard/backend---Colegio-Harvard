@@ -37,7 +37,7 @@ const registrarEvento = async (req, res) => {
     const asignacion = await prisma.tbl_asignaciones_porteria.findUnique({ where: { id_usuario_porteria: req.user.id } });
     if (asignacion) {
       idPuntoEscaneo = asignacion.id_punto_escaneo;
-    } else if (['SUPER_ADMIN', 'ADMIN'].includes(req.user.rol_codigo)) {
+    } else if (['SUPER_ADMIN', 'ADMIN', 'PORTERIA'].includes(req.user.rol_codigo)) {
       let puntoDefault = await prisma.tbl_puntos_escaneo.findFirst({ where: { activo: true }, orderBy: { id: 'asc' } });
       if (!puntoDefault) {
         puntoDefault = await prisma.tbl_puntos_escaneo.create({
