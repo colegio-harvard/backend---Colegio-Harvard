@@ -159,6 +159,27 @@ const registrarEvento = async (req, res) => {
   }
 };
 
+const construirCalendarioVacio = (mes, anio) => {
+  const diasEnMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
+  const primerDia = new Date(Date.UTC(anio, mes - 1, 1)).getUTCDay();
+  const diasCalendario = [];
+  const offsetDia = primerDia === 0 ? 6 : primerDia - 1;
+
+  for (let i = 0; i < offsetDia; i++) {
+    diasCalendario.push({ dia: null, estado: null });
+  }
+
+  for (let d = 1; d <= diasEnMes; d++) {
+    diasCalendario.push({
+      dia: d,
+      fecha: `${anio}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+      estado: null,
+    });
+  }
+
+  return diasCalendario;
+};
+
 // FLW-10: Vista padre - asistencia calendario mensual (auto-detecta hijos)
 const calendarioPadre = async (req, res) => {
   let { id_alumno, mes, anio } = req.query;
@@ -341,6 +362,16 @@ const calendarioPadre = async (req, res) => {
     });
   } catch (error) {
     console.error('Error calendario padre:', error);
+    const mesFallback = Number.isInteger(mes) && mes >= 1 && mes <= 12 ? mes : parseInt(todayLima().iso.split('-')[1], 10);
+    const anioFallback = Number.isInteger(anio) ? anio : parseInt(todayLima().iso.split('-')[0], 10);
+    if (req.user?.rol_codigo === 'PADRE') {
+      return res.json({
+        data: construirCalendarioVacio(mesFallback, anioFallback),
+        id_alumno: id_alumno ? parseInt(id_alumno, 10) : null,
+        alumno: null,
+        hijos: [],
+      });
+    }
     res.status(500).json({ error: 'Error al obtener calendario' });
   }
 };
