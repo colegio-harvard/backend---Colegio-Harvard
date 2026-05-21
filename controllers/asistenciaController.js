@@ -244,10 +244,19 @@ const calendarioPadre = async (req, res) => {
       orderBy: { fecha: 'asc' },
     });
 
-    const eventos = asistencias.length > 0 ? [] : await prisma.tbl_eventos_asistencia.findMany({
+    const eventos = await prisma.tbl_eventos_asistencia.findMany({
       where: { id_alumno: idAlumnoNum, fecha_evento: { gte: fechaInicio, lte: fechaFin } },
       include: { tbl_puntos_escaneo: { select: { nombre: true } } },
       orderBy: [{ fecha_evento: 'asc' }, { fecha_hora_evento: 'asc' }],
+    });
+
+    const alertasNoLlego = await prisma.tbl_alertas.findMany({
+      where: {
+        id_alumno: idAlumnoNum,
+        tipo: 'NO_LLEGO',
+        fecha: { gte: fechaInicio, lte: fechaFin },
+      },
+      orderBy: { fecha: 'asc' },
     });
 
     const eventosPorDia = new Map();
@@ -257,6 +266,11 @@ const calendarioPadre = async (req, res) => {
       const grupo = eventosPorDia.get(dia);
       if (evento.tipo_evento === 'CHECKIN' && !grupo.checkin) grupo.checkin = evento;
       if (evento.tipo_evento === 'CHECKOUT' && !grupo.checkout) grupo.checkout = evento;
+    }
+
+    const alertasPorDia = new Map();
+    for (const alerta of alertasNoLlego) {
+      alertasPorDia.set(alerta.fecha.getUTCDate(), alerta);
     }
 
     // Construir calendario con dias del mes
@@ -277,12 +291,14 @@ const calendarioPadre = async (req, res) => {
         return f.getUTCDate() === d;
       });
       const eventoDia = eventosPorDia.get(d);
+      const alertaDia = alertasPorDia.get(d);
 
       if (asistenciaDia) {
         diasCalendario.push({
           dia: d,
           fecha: fechaDia,
           estado: asistenciaDia.estado,
+          id_alerta_no_llego: asistenciaDia.id_alerta_no_llego || alertaDia?.id || null,
           hora_ingreso: asistenciaDia.tbl_evento_checkin?.hora_evento || null,
           metodo_ingreso: asistenciaDia.tbl_evento_checkin?.metodo || null,
           punto_escaneo: asistenciaDia.tbl_evento_checkin?.tbl_puntos_escaneo?.nombre || null,
@@ -299,6 +315,18 @@ const calendarioPadre = async (req, res) => {
           punto_escaneo: eventoDia.checkin.tbl_puntos_escaneo?.nombre || null,
           hora_salida: eventoDia.checkout?.hora_evento || null,
           salida_no_registrada: !!eventoDia.checkin && !eventoDia.checkout,
+        });
+      } else if (alertaDia) {
+        diasCalendario.push({
+          dia: d,
+          fecha: fechaDia,
+          estado: 'AUSENTE',
+          id_alerta_no_llego: alertaDia.id,
+          hora_ingreso: null,
+          metodo_ingreso: null,
+          punto_escaneo: null,
+          hora_salida: null,
+          salida_no_registrada: false,
         });
       } else {
         diasCalendario.push({ dia: d, fecha: fechaDia, estado: null });
