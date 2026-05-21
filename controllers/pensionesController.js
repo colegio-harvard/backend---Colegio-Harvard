@@ -209,12 +209,15 @@ const registrarPago = async (req, res) => {
       }
 
     } else if (estado === 'PAGO_PARCIAL') {
-      if (!monto_total || !monto_pago) {
+      if (monto_total === undefined || monto_total === null || monto_total === '' || monto_pago === undefined || monto_pago === null || monto_pago === '') {
         return res.status(400).json({ error: 'monto_total y monto_pago son obligatorios para pago parcial' });
       }
 
       const montoTotal = parseFloat(monto_total);
       const montoPago = parseFloat(monto_pago);
+      if (Number.isNaN(montoTotal) || montoTotal <= 0 || Number.isNaN(montoPago) || montoPago < 0) {
+        return res.status(400).json({ error: 'Montos invalidos para pago parcial' });
+      }
       const nuevoPagado = (existente ? Number(existente.monto_pagado) : 0) + montoPago;
 
       // Si el nuevo total pagado cubre o supera el monto total, marcar como PAGADO
@@ -277,7 +280,7 @@ const registrarPago = async (req, res) => {
       userId: req.user.id,
       accion: 'REGISTRAR_PAGO_PENSION',
       tipoEntidad: 'tbl_estado_pension',
-      resumen: `Pension alumno ${id_alumno} mes ${clave_mes}: ${estado}${monto_pago ? ` - S/. ${monto_pago}` : ''}`,
+      resumen: `Pension alumno ${id_alumno} mes ${clave_mes}: ${estado}${monto_pago !== undefined && monto_pago !== null && monto_pago !== '' ? ` - S/. ${monto_pago}` : ''}`,
     });
 
     res.json({ mensaje: 'Pension actualizada' });
@@ -315,6 +318,7 @@ const cuadricula = async (req, res) => {
       nombre_completo: a.nombre_completo,
       codigo_alumno: a.codigo_alumno,
       dni: a.dni || null,
+      monto_pension: a.monto_pension !== null && a.monto_pension !== undefined ? Number(a.monto_pension) : null,
       aula: a.tbl_aulas ? {
         id: a.tbl_aulas.id,
         seccion: a.tbl_aulas.seccion,
