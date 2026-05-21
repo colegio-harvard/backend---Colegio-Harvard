@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon index.js",
     "start": "node index.js",
-    "build": "npx prisma generate && npx prisma migrate deploy",
+    "build": "npx prisma generate && (npx prisma migrate resolve --rolled-back 20260521100000_add_monto_pension_alumnos || true) && npx prisma migrate deploy",
     "prisma:migrate": "npx prisma migrate dev",
     "prisma:generate": "npx prisma generate",
     "prisma:seed": "node prisma/seed.js",
