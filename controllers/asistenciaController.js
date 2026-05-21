@@ -186,6 +186,12 @@ const fechaKey = (fecha) => {
   return String(fecha).slice(0, 10);
 };
 
+const estaEnMes = (fecha, mes, anio) => {
+  const key = fechaKey(fecha);
+  if (!key) return false;
+  return key.startsWith(`${anio}-${String(mes).padStart(2, '0')}-`);
+};
+
 // FLW-10: Vista padre - asistencia calendario mensual (auto-detecta hijos)
 const calendarioPadre = async (req, res) => {
   let { id_alumno, mes, anio } = req.query;
@@ -263,13 +269,14 @@ const calendarioPadre = async (req, res) => {
     if (!Number.isInteger(idAlumnoNum)) {
       return res.status(400).json({ error: 'id_alumno invalido' });
     }
-    const idsConsulta = req.user.rol_codigo === 'PADRE' && idsHijosPadre.length > 0
-      ? idsHijosPadre
-      : [idAlumnoNum];
-    const fechaFinDia = new Date(`${anio}-${String(mes).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`);
+    const esPadre = req.user.rol_codigo === 'PADRE';
+    const idsConsulta = esPadre && idsHijosPadre.length > 0 ? idsHijosPadre : [idAlumnoNum];
 
-    const asistencias = await prisma.tbl_asistencia_dia.findMany({
-      where: { id_alumno: { in: idsConsulta }, fecha: { gte: fechaInicio, lte: fechaFin } },
+    const asistenciasRaw = await prisma.tbl_asistencia_dia.findMany({
+      where: {
+        id_alumno: { in: idsConsulta },
+        ...(esPadre ? {} : { fecha: { gte: fechaInicio, lte: fechaFin } }),
+      },
       include: {
         tbl_evento_checkin: { select: { hora_evento: true, metodo: true, id_punto_escaneo: true, tbl_puntos_escaneo: { select: { nombre: true } } } },
         tbl_evento_checkout: { select: { hora_evento: true } },
@@ -277,23 +284,26 @@ const calendarioPadre = async (req, res) => {
       orderBy: { fecha: 'asc' },
     });
 
-    const eventos = await prisma.tbl_eventos_asistencia.findMany({
-      where: { id_alumno: { in: idsConsulta }, fecha_evento: { gte: fechaInicio, lte: fechaFin } },
+    const eventosRaw = await prisma.tbl_eventos_asistencia.findMany({
+      where: {
+        id_alumno: { in: idsConsulta },
+        ...(esPadre ? {} : { fecha_evento: { gte: fechaInicio, lte: fechaFin } }),
+      },
       include: { tbl_puntos_escaneo: { select: { nombre: true } } },
       orderBy: [{ fecha_evento: 'asc' }, { fecha_hora_evento: 'asc' }],
     });
 
-    const alertasNoLlego = await prisma.tbl_alertas.findMany({
+    const alertasNoLlegoRaw = await prisma.tbl_alertas.findMany({
       where: {
         id_alumno: { in: idsConsulta },
         tipo: 'NO_LLEGO',
-        OR: [
-          { fecha: { gte: fechaInicio, lte: fechaFin } },
-          { date_time_registration: { gte: fechaInicio, lte: fechaFinDia } },
-        ],
+        ...(esPadre ? {} : { fecha: { gte: fechaInicio, lte: fechaFin } }),
       },
       orderBy: [{ fecha: 'asc' }, { date_time_registration: 'asc' }],
     });
+    const asistencias = asistenciasRaw.filter(a => estaEnMes(a.fecha, mes, anio));
+    const eventos = eventosRaw.filter(e => estaEnMes(e.fecha_evento, mes, anio));
+    const alertasNoLlego = alertasNoLlegoRaw.filter(a => estaEnMes(a.fecha, mes, anio) || estaEnMes(a.date_time_registration, mes, anio));
 
     const asistenciasPorFecha = new Map();
     for (const asistencia of asistencias) {
