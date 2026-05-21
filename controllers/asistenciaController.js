@@ -30,27 +30,45 @@ const normalizarMesesPlantilla = (mesesRaw) => {
   return normalized;
 };
 
+const mesesPensionPorDefecto = () => ([
+  { clave: 'MAR', nombre: 'Marzo', tipo: 'mes', comentario: '' },
+  { clave: 'ABR', nombre: 'Abril', tipo: 'mes', comentario: '' },
+  { clave: 'MAY', nombre: 'Mayo', tipo: 'mes', comentario: '' },
+  { clave: 'JUN', nombre: 'Junio', tipo: 'mes', comentario: '' },
+  { clave: 'JUL', nombre: 'Julio', tipo: 'mes', comentario: '' },
+  { clave: 'AGO', nombre: 'Agosto', tipo: 'mes', comentario: '' },
+  { clave: 'SET', nombre: 'Setiembre', tipo: 'mes', comentario: '' },
+  { clave: 'OCT', nombre: 'Octubre', tipo: 'mes', comentario: '' },
+  { clave: 'NOV', nombre: 'Noviembre', tipo: 'mes', comentario: '' },
+  { clave: 'DIC', nombre: 'Diciembre', tipo: 'mes', comentario: '' },
+]);
+
 const obtenerPensionesAlumno = async (idAlumno, idAnioEscolar) => {
-  const [plantilla, estados] = await Promise.all([
+  const [plantilla, estados, alumno] = await Promise.all([
     prisma.tbl_plantilla_pension.findFirst({ where: { id_anio_escolar: idAnioEscolar } }),
     prisma.tbl_estado_pension.findMany({
       where: { id_alumno: idAlumno },
       orderBy: { clave_mes: 'asc' },
     }),
+    prisma.tbl_alumnos.findUnique({
+      where: { id: idAlumno },
+      select: { monto_pension: true },
+    }),
   ]);
 
   const estadosMap = new Map(estados.map(e => [e.clave_mes, e]));
   const mesesPlantilla = normalizarMesesPlantilla(plantilla?.meses_json);
+  const mesesBase = mesesPlantilla.length > 0 ? mesesPlantilla : mesesPensionPorDefecto();
   const clavesExtras = estados
     .map(e => e.clave_mes)
-    .filter(clave => !mesesPlantilla.some(m => m.clave === clave));
+    .filter(clave => !mesesBase.some(m => m.clave === clave));
 
   const meses = [
-    ...mesesPlantilla,
+    ...mesesBase,
     ...clavesExtras.map(clave => ({ clave, nombre: clave, tipo: 'mes', comentario: '' })),
   ].map(m => {
     const estado = estadosMap.get(m.clave);
-    const montoTotal = estado?.monto_total ? Number(estado.monto_total) : null;
+    const montoTotal = estado?.monto_total ? Number(estado.monto_total) : (alumno?.monto_pension ? Number(alumno.monto_pension) : null);
     const montoPagado = estado ? Number(estado.monto_pagado) : 0;
     return {
       clave: m.clave,
