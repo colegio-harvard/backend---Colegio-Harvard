@@ -6,6 +6,13 @@ const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { validarContrasena } = require('../utils/validaciones');
 const { uploadFile } = require('../utils/storageService');
 
+const parseMontoPension = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : NaN;
+};
+
 const listar = async (req, res) => {
   const { id_aula, estado } = req.query;
   try {
@@ -29,6 +36,7 @@ const listar = async (req, res) => {
       dni: a.dni,
       nombre_completo: a.nombre_completo,
       foto_url: a.foto_url,
+      monto_pension: a.monto_pension !== null && a.monto_pension !== undefined ? Number(a.monto_pension) : null,
       estado: a.estado,
       id_aula: a.id_aula,
       aula: a.tbl_aulas ? {
@@ -77,13 +85,16 @@ const obtenerPorId = async (req, res) => {
 };
 
 const crear = async (req, res) => {
-  const { codigo_alumno, dni, nombre_completo, id_aula, padre_dni, padre_nombre, padre_celular, padre_username, padre_contrasena } = req.body;
+  const { codigo_alumno, dni, nombre_completo, monto_pension, id_aula, padre_dni, padre_nombre, padre_celular, padre_username, padre_contrasena } = req.body;
 
   if (!codigo_alumno || !nombre_completo || !id_aula) {
     return res.status(400).json({ error: 'Codigo, nombre y aula son obligatorios' });
   }
 
   try {
+    const montoPensionValue = parseMontoPension(monto_pension);
+    if (Number.isNaN(montoPensionValue)) return res.status(400).json({ error: 'Monto de pension invalido' });
+
     const codigoExiste = await prisma.tbl_alumnos.findFirst({
       where: { codigo_alumno: { equals: codigo_alumno, mode: 'insensitive' } },
     });
@@ -114,6 +125,7 @@ const crear = async (req, res) => {
           codigo_alumno,
           dni: dni || null,
           nombre_completo,
+          monto_pension: montoPensionValue ?? null,
           foto_url,
           estado: 'ACTIVO',
           id_aula: parseInt(id_aula),
@@ -182,9 +194,12 @@ const crear = async (req, res) => {
 
 const actualizar = async (req, res) => {
   const id = parseInt(req.params.id);
-  const { nombre_completo, dni, id_aula, estado } = req.body;
+  const { nombre_completo, dni, monto_pension, id_aula, estado } = req.body;
 
   try {
+    const montoPensionValue = parseMontoPension(monto_pension);
+    if (Number.isNaN(montoPensionValue)) return res.status(400).json({ error: 'Monto de pension invalido' });
+
     // Validar duplicado de DNI (excluyendo al alumno actual)
     if (dni) {
       const dniDuplicado = await prisma.tbl_alumnos.findFirst({
@@ -196,6 +211,7 @@ const actualizar = async (req, res) => {
     const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
     if (nombre_completo) data.nombre_completo = nombre_completo;
     if (dni !== undefined) data.dni = dni || null;
+    if (montoPensionValue !== undefined) data.monto_pension = montoPensionValue;
     if (id_aula) data.id_aula = parseInt(id_aula);
     if (estado) data.estado = estado;
 

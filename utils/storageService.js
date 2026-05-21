@@ -1,4 +1,4 @@
-const { PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const s3 = require('../config/wasabi');
 
 const BUCKET = process.env.WASABI_BUCKET || 'colegio-fernando-storage';
@@ -32,6 +32,13 @@ const deleteFile = async (key) => {
   }));
 };
 
+const getFile = async (key) => {
+  return s3.send(new GetObjectCommand({
+    Bucket: BUCKET,
+    Key: key,
+  }));
+};
+
 /**
  * Construye la URL publica de un objeto en Wasabi.
  * @param {string} key - Ruta dentro del bucket
@@ -42,4 +49,4 @@ const getPublicUrl = (key) => {
   return `${endpoint}/${BUCKET}/${key}`;
 };
 
-module.exports = { uploadFile, deleteFile, getPublicUrl };
+module.exports = { uploadFile, deleteFile, getFile, getPublicUrl };
