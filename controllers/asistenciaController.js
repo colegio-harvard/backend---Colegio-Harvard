@@ -303,6 +303,35 @@ const calendarioPadre = async (req, res) => {
     const asistencias = asistenciasRaw.filter(a => estaEnMes(a.fecha, mes, anio));
     const eventos = eventosRaw.filter(e => estaEnMes(e.fecha_evento, mes, anio));
     const alertasMes = alertasRaw.filter(a => estaEnMes(a.fecha, mes, anio) || estaEnMes(a.date_time_registration, mes, anio));
+    if (esPadre) {
+      console.info('DEBUG_ASISTENCIA_PADRE', {
+        userId: req.user.id,
+        mes,
+        anio,
+        idAlumnoSolicitado: idAlumnoNum,
+        idsConsulta,
+        raw: {
+          asistencias: asistenciasRaw.length,
+          eventos: eventosRaw.length,
+          alertas: alertasRaw.length,
+        },
+        filtrado: {
+          asistencias: asistencias.length,
+          eventos: eventos.length,
+          alertas: alertasMes.length,
+        },
+        primerasFechas: {
+          asistencias: asistenciasRaw.slice(0, 5).map(a => fechaKey(a.fecha)),
+          eventos: eventosRaw.slice(0, 5).map(e => fechaKey(e.fecha_evento)),
+          alertas: alertasRaw.slice(0, 5).map(a => ({
+            fecha: fechaKey(a.fecha),
+            registro: fechaKey(a.date_time_registration),
+            tipo: a.tipo,
+            estado: a.estado,
+          })),
+        },
+      });
+    }
 
     const asistenciasPorFecha = new Map();
     for (const asistencia of asistencias) {
