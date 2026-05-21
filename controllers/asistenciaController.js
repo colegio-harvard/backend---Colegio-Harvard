@@ -170,17 +170,58 @@ const calendarioPadre = async (req, res) => {
       return res.status(400).json({ error: 'Mes o anio invalido' });
     }
 
+    let hijos = [];
     if (req.user.rol_codigo === 'PADRE') {
       const padre = await prisma.tbl_padres.findUnique({ where: { id_usuario: req.user.id } });
       if (!padre) return res.status(404).json({ error: 'Padre no encontrado' });
       const vinculos = await prisma.tbl_padres_alumnos.findMany({
         where: { id_padre: padre.id },
-        select: { id_alumno: true },
+        include: {
+          tbl_alumnos: {
+            select: {
+              id: true,
+              nombre_completo: true,
+              codigo_alumno: true,
+              foto_url: true,
+              estado: true,
+              tbl_aulas: {
+                select: {
+                  seccion: true,
+                  tbl_grados: {
+                    select: {
+                      nombre: true,
+                      tbl_niveles: { select: { nombre: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         orderBy: { id: 'asc' },
       });
       if (vinculos.length === 0) return res.json({ data: [], hijos: [] });
-      const idsHijos = vinculos.map(v => v.id_alumno);
-      const solicitado = parseInt(id_alumno, 10);
+
+      hijos = vinculos.map(v => {
+        const alumno = v.tbl_alumnos;
+        return {
+          id: alumno.id,
+          nombre_completo: alumno.nombre_completo,
+          codigo_alumno: alumno.codigo_alumno,
+          foto_url: alumno.foto_url,
+          estado: alumno.estado,
+          aula: alumno.tbl_aulas ? {
+            seccion: alumno.tbl_aulas.seccion,
+            grado: alumno.tbl_aulas.tbl_grados ? {
+              nombre: alumno.tbl_aulas.tbl_grados.nombre,
+              nivel: alumno.tbl_aulas.tbl_grados.tbl_niveles?.nombre || null,
+            } : null,
+          } : null,
+        };
+      });
+
+      const idsHijos = hijos.map(h => h.id);
+      const solicitado = id_alumno ? parseInt(id_alumno, 10) : null;
       id_alumno = idsHijos.includes(solicitado) ? solicitado : idsHijos[0];
     } else if (!id_alumno) {
       return res.status(400).json({ error: 'Debe enviar id_alumno' });
@@ -190,6 +231,9 @@ const calendarioPadre = async (req, res) => {
     const lastDay = new Date(Date.UTC(anio, mes, 0)).getUTCDate();
     const fechaFin = parseDateOnly(`${anio}-${String(mes).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`);
     const idAlumnoNum = parseInt(id_alumno, 10);
+    if (!Number.isInteger(idAlumnoNum)) {
+      return res.status(400).json({ error: 'id_alumno invalido' });
+    }
 
     const asistencias = await prisma.tbl_asistencia_dia.findMany({
       where: { id_alumno: idAlumnoNum, fecha: { gte: fechaInicio, lte: fechaFin } },
@@ -243,7 +287,7 @@ const calendarioPadre = async (req, res) => {
           metodo_ingreso: asistenciaDia.tbl_evento_checkin?.metodo || null,
           punto_escaneo: asistenciaDia.tbl_evento_checkin?.tbl_puntos_escaneo?.nombre || null,
           hora_salida: asistenciaDia.tbl_evento_checkout?.hora_evento || null,
-          salida_no_registrada: asistenciaDia.id_evento_checkin && !asistenciaDia.id_evento_checkout,
+          salida_no_registrada: !!asistenciaDia.id_evento_checkin && !asistenciaDia.id_evento_checkout,
         });
       } else if (eventoDia?.checkin) {
         diasCalendario.push({
@@ -261,7 +305,12 @@ const calendarioPadre = async (req, res) => {
       }
     }
 
-    res.json({ data: diasCalendario });
+    res.json({
+      data: diasCalendario,
+      id_alumno: idAlumnoNum,
+      alumno: hijos.find(h => h.id === idAlumnoNum) || null,
+      hijos,
+    });
   } catch (error) {
     console.error('Error calendario padre:', error);
     res.status(500).json({ error: 'Error al obtener calendario' });
