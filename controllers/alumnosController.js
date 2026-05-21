@@ -19,6 +19,7 @@ const listar = async (req, res) => {
     const where = {};
     if (id_aula) where.id_aula = parseInt(id_aula);
     if (estado) where.estado = estado;
+    else where.estado = { not: 'DELETED' };
 
     const alumnos = await prisma.tbl_alumnos.findMany({
       where,
@@ -233,6 +234,49 @@ const actualizar = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al actualizar alumno' }); }
 };
 
+const eliminar = async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID de alumno invalido' });
+
+  try {
+    const alumno = await prisma.tbl_alumnos.findUnique({ where: { id } });
+    if (!alumno) return res.status(404).json({ error: 'Alumno no encontrado' });
+
+    if (alumno.estado === 'DELETED') {
+      return res.json({ data: { mensaje: 'Alumno ya estaba eliminado' } });
+    }
+
+    const suffix = `_DELETED_${id}`;
+    await prisma.tbl_alumnos.update({
+      where: { id },
+      data: {
+        estado: 'DELETED',
+        codigo_alumno: alumno.codigo_alumno && !alumno.codigo_alumno.includes('_DELETED_')
+          ? `${alumno.codigo_alumno}${suffix}`
+          : alumno.codigo_alumno,
+        dni: alumno.dni && !alumno.dni.includes('_DELETED_')
+          ? `${alumno.dni}${suffix}`
+          : alumno.dni,
+        user_id_modification: req.user.id,
+        date_time_modification: new Date(),
+      },
+    });
+
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: 'ELIMINAR_ALUMNO',
+      tipoEntidad: 'tbl_alumnos',
+      idEntidad: id,
+      resumen: `Alumno ${alumno.nombre_completo} eliminado (soft)`,
+    });
+
+    res.json({ data: { mensaje: 'Alumno eliminado' } });
+  } catch (error) {
+    console.error('Error al eliminar alumno:', error);
+    res.status(500).json({ error: 'Error al eliminar alumno' });
+  }
+};
+
 // Subir foto del alumno (endpoint separado para cambiar foto existente)
 const subirFoto = async (req, res) => {
   const id = parseInt(req.params.id);
@@ -327,4 +371,4 @@ const reemitirCarnet = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al reemitir carnet' }); }
 };
 
-module.exports = { listar, obtenerPorId, crear, actualizar, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };
+module.exports = { listar, obtenerPorId, crear, actualizar, eliminar, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };
