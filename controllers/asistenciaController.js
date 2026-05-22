@@ -950,7 +950,12 @@ const historialPorteria = async (req, res) => {
               },
             },
           },
-          tbl_usuarios: { select: { nombres: true, apellidos: true, rol: true } },
+          tbl_usuarios: {
+            select: {
+              nombres: true,
+              tbl_roles: { select: { codigo: true, nombre: true } },
+            },
+          },
         },
         orderBy: { fecha_hora_evento: 'desc' },
         skip,
@@ -977,8 +982,8 @@ const historialPorteria = async (req, res) => {
           nivel: aula?.tbl_grados?.tbl_niveles?.nombre || null,
         } : null,
         registrado_por: e.tbl_usuarios ? {
-          nombre: `${e.tbl_usuarios.nombres || ''} ${e.tbl_usuarios.apellidos || ''}`.trim(),
-          rol: e.tbl_usuarios.rol,
+          nombre: e.tbl_usuarios.nombres || '',
+          rol: e.tbl_usuarios.tbl_roles?.codigo || e.tbl_usuarios.tbl_roles?.nombre || null,
         } : null,
       };
     });
