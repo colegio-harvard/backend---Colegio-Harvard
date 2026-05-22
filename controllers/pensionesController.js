@@ -118,6 +118,34 @@ const crearPagoConTicket = async ({ estadoPension, monto, fechaPago, observacion
   return { ...pago, ticket_json: { ...ticket, id_pago: pago.id } };
 };
 
+const asegurarTicketPagoExistente = async ({ pago, estadoPension, alumno, plantilla, usuario, montoPagadoAcumulado }) => {
+  if (pago.codigo_ticket && pago.ticket_json) return pago;
+
+  const codigo = pago.codigo_ticket || await generarCodigoTicket();
+  const ticket = buildTicket({
+    codigo,
+    pago,
+    alumno,
+    plantilla,
+    estadoPension,
+    concepto: nombreConcepto(plantilla, estadoPension.clave_mes),
+    montoTotal: estadoPension.monto_total,
+    montoPagadoAcumulado,
+    observacion: pago.observacion,
+    usuario,
+  });
+
+  const actualizado = await prisma.tbl_pagos_pension.update({
+    where: { id: pago.id },
+    data: {
+      codigo_ticket: codigo,
+      ticket_json: { ...ticket, id_pago: pago.id },
+    },
+  });
+
+  return { ...actualizado, ticket_json: { ...ticket, id_pago: pago.id } };
+};
+
 // Obtener plantilla del año activo
 const obtenerPlantilla = async (req, res) => {
   try {
@@ -236,11 +264,33 @@ const obtenerDetalleMes = async (req, res) => {
   try {
     const estado = await prisma.tbl_estado_pension.findUnique({
       where: { id_alumno_clave_mes: { id_alumno: parseInt(id_alumno), clave_mes } },
-      include: { tbl_pagos_pension: { orderBy: { fecha_pago: 'asc' } } },
+      include: {
+        tbl_alumnos: { select: selectAlumnoTicket },
+        tbl_plantilla_pension: { include: { tbl_anios_escolares: { select: { anio: true } } } },
+        tbl_pagos_pension: {
+          include: { tbl_usuarios: { select: { id: true, nombres: true, tbl_roles: { select: { codigo: true, nombre: true } } } } },
+          orderBy: { fecha_pago: 'asc' },
+        },
+      },
     });
 
     if (!estado) {
       return res.json({ data: { estado: 'PENDIENTE', monto_total: null, monto_pagado: 0, pagos: [] } });
+    }
+
+    let acumulado = 0;
+    const pagos = [];
+    for (const pago of estado.tbl_pagos_pension) {
+      acumulado += Number(pago.monto || 0);
+      const pagoConTicket = await asegurarTicketPagoExistente({
+        pago,
+        estadoPension: estado,
+        alumno: estado.tbl_alumnos,
+        plantilla: estado.tbl_plantilla_pension,
+        usuario: pago.tbl_usuarios,
+        montoPagadoAcumulado: acumulado,
+      });
+      pagos.push(pagoConTicket);
     }
 
     res.json({
@@ -249,7 +299,7 @@ const obtenerDetalleMes = async (req, res) => {
         estado: estado.estado,
         monto_total: estado.monto_total ? Number(estado.monto_total) : null,
         monto_pagado: Number(estado.monto_pagado),
-        pagos: estado.tbl_pagos_pension.map(p => ({
+        pagos: pagos.map(p => ({
           id: p.id,
           monto: Number(p.monto),
           fecha: p.fecha_pago.toISOString().split('T')[0],
