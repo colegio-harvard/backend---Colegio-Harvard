@@ -3,7 +3,7 @@ const XLSX = require('xlsx');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { emitToUser, emitToAula } = require('../utils/socketEmitter');
 const { enviarNotificacion } = require('../utils/notifUtils');
-const { utcNow, toUtcIso, todayLima, currentLimaTimeMs, timeFieldToMs, parseDateOnly } = require('../utils/dateUtils');
+const { utcNow, toUtcIso, todayLima, currentLimaTimeMs, timeFieldToMs, parseDateOnly, SCHOOL_UTC_OFFSET_MS } = require('../utils/dateUtils');
 
 const normalizarMesesPlantilla = (mesesRaw) => {
   const meses = Array.isArray(mesesRaw) ? mesesRaw : [];
@@ -42,6 +42,42 @@ const mesesPensionPorDefecto = () => ([
   { clave: 'NOV', nombre: 'Noviembre', tipo: 'mes', comentario: '' },
   { clave: 'DIC', nombre: 'Diciembre', tipo: 'mes', comentario: '' },
 ]);
+
+const timeFieldToLimaMs = (dateObj) => {
+  const dayMs = 24 * 60 * 60 * 1000;
+  return (timeFieldToMs(dateObj) + SCHOOL_UTC_OFFSET_MS + dayMs) % dayMs;
+};
+
+const fechaCivilIso = (dateObj) => new Date(dateObj).toISOString().slice(0, 10);
+
+const localTimeToUtcDate = (fecha, hora) => {
+  if (!hora || !/^\d{2}:\d{2}$/.test(hora)) return null;
+  const iso = fechaCivilIso(fecha);
+  const date = new Date(`${iso}T${hora}:00-05:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const calcularEstadoDesdeCheckin = async (asistencia, checkin) => {
+  if (!checkin) return 'AUSENTE';
+
+  const alumno = await prisma.tbl_alumnos.findUnique({
+    where: { id: asistencia.id_alumno },
+    select: { tbl_aulas: { select: { id_grado: true } } },
+  });
+  const grado = alumno?.tbl_aulas?.id_grado
+    ? await prisma.tbl_grados.findUnique({ where: { id: alumno.tbl_aulas.id_grado } })
+    : null;
+  const horarioNivel = grado ? await prisma.tbl_horarios_nivel.findUnique({
+    where: { id_nivel_id_anio_escolar: { id_nivel: grado.id_nivel, id_anio_escolar: asistencia.id_anio_escolar } },
+  }) : null;
+
+  if (!horarioNivel) return 'PRESENTE';
+
+  const horaInicioMs = timeFieldToMs(horarioNivel.hora_inicio);
+  const toleranciaMs = horarioNivel.tolerancia_tardanza_min * 60000;
+  const horaCheckinMs = timeFieldToLimaMs(checkin.hora_evento);
+  return horaCheckinMs <= (horaInicioMs + toleranciaMs) ? 'PRESENTE' : 'TARDE';
+};
 
 const obtenerPensionesAlumno = async (idAlumno, idAnioEscolar) => {
   const [plantilla, estados, alumno] = await Promise.all([
@@ -732,34 +768,128 @@ const exportarExcel = async (req, res) => {
   }
 };
 
-// FLW-13: Correccion de asistencia (simplificado)
+// FLW-13: Correccion de asistencia
 const corregirAsistencia = async (req, res) => {
-  const { id_asistencia_dia, nuevo_estado, motivo } = req.body;
+  const { id_asistencia_dia, nuevo_estado, motivo, hora_ingreso, hora_salida, eliminar_ingreso, eliminar_salida } = req.body;
   if (!motivo) return res.status(400).json({ error: 'Motivo obligatorio.' });
-  if (!nuevo_estado) return res.status(400).json({ error: 'Nuevo estado obligatorio.' });
-  if (!['PRESENTE', 'TARDE', 'AUSENTE'].includes(nuevo_estado)) {
+  if (nuevo_estado && !['PRESENTE', 'TARDE', 'AUSENTE'].includes(nuevo_estado)) {
     return res.status(400).json({ error: 'Estado debe ser PRESENTE, TARDE o AUSENTE' });
   }
 
   try {
-    const asistencia = await prisma.tbl_asistencia_dia.findUnique({ where: { id: id_asistencia_dia } });
-    if (!asistencia) return res.status(404).json({ error: 'Registro de asistencia no encontrado' });
-
-    const valorAnterior = asistencia.estado;
-
-    await prisma.tbl_asistencia_dia.update({
+    const asistencia = await prisma.tbl_asistencia_dia.findUnique({
       where: { id: id_asistencia_dia },
-      data: { estado: nuevo_estado, user_id_modification: req.user.id, date_time_modification: new Date() },
+      include: {
+        tbl_evento_checkin: true,
+        tbl_evento_checkout: true,
+      },
+    });
+    if (!asistencia) return res.status(404).json({ error: 'Registro de asistencia no encontrado' });
+    const cambios = [];
+    const eventUpdates = [];
+    const updateAsistencia = {
+      user_id_modification: req.user.id,
+      date_time_modification: new Date(),
+    };
+
+    if (eliminar_ingreso) {
+      if (!asistencia.id_evento_checkin) return res.status(400).json({ error: 'Este registro no tiene ingreso para eliminar.' });
+      updateAsistencia.id_evento_checkin = null;
+      updateAsistencia.estado = (asistencia.id_evento_checkout && !eliminar_salida) ? (nuevo_estado || asistencia.estado) : 'AUSENTE';
+      cambios.push({ campo: 'ingreso', anterior: String(asistencia.id_evento_checkin), nuevo: 'ELIMINADO' });
+    }
+
+    if (eliminar_salida) {
+      if (!asistencia.id_evento_checkout) return res.status(400).json({ error: 'Este registro no tiene salida para eliminar.' });
+      updateAsistencia.id_evento_checkout = null;
+      cambios.push({ campo: 'salida', anterior: String(asistencia.id_evento_checkout), nuevo: 'ELIMINADO' });
+    }
+
+    if (!eliminar_ingreso && hora_ingreso) {
+      if (!asistencia.tbl_evento_checkin) return res.status(400).json({ error: 'Este registro no tiene ingreso para corregir.' });
+      const nuevaHoraIngreso = localTimeToUtcDate(asistencia.fecha, hora_ingreso);
+      if (!nuevaHoraIngreso) return res.status(400).json({ error: 'Hora de ingreso invalida.' });
+      eventUpdates.push({
+        id: asistencia.id_evento_checkin,
+        data: { hora_evento: nuevaHoraIngreso, fecha_hora_evento: nuevaHoraIngreso, user_id_modification: req.user.id, date_time_modification: new Date() },
+      });
+      cambios.push({ campo: 'hora_ingreso', anterior: toUtcIso(asistencia.tbl_evento_checkin.hora_evento), nuevo: hora_ingreso });
+      asistencia.tbl_evento_checkin.hora_evento = nuevaHoraIngreso;
+    }
+
+    if (!eliminar_salida && hora_salida) {
+      if (!asistencia.tbl_evento_checkout) return res.status(400).json({ error: 'Este registro no tiene salida para corregir.' });
+      const nuevaHoraSalida = localTimeToUtcDate(asistencia.fecha, hora_salida);
+      if (!nuevaHoraSalida) return res.status(400).json({ error: 'Hora de salida invalida.' });
+      eventUpdates.push({
+        id: asistencia.id_evento_checkout,
+        data: { hora_evento: nuevaHoraSalida, fecha_hora_evento: nuevaHoraSalida, user_id_modification: req.user.id, date_time_modification: new Date() },
+      });
+      cambios.push({ campo: 'hora_salida', anterior: toUtcIso(asistencia.tbl_evento_checkout.hora_evento), nuevo: hora_salida });
+    }
+
+    if (nuevo_estado && !eliminar_ingreso && !eliminar_salida && nuevo_estado !== asistencia.estado) {
+      updateAsistencia.estado = nuevo_estado;
+      cambios.push({ campo: 'estado', anterior: asistencia.estado, nuevo: nuevo_estado });
+    }
+
+    if (eliminar_salida && !updateAsistencia.estado && asistencia.tbl_evento_checkin) {
+      updateAsistencia.estado = await calcularEstadoDesdeCheckin(asistencia, asistencia.tbl_evento_checkin);
+    }
+    if (!eliminar_ingreso && hora_ingreso && !nuevo_estado) {
+      updateAsistencia.estado = await calcularEstadoDesdeCheckin(asistencia, asistencia.tbl_evento_checkin);
+      cambios.push({ campo: 'estado', anterior: asistencia.estado, nuevo: updateAsistencia.estado });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      for (const eventUpdate of eventUpdates) {
+        await tx.tbl_eventos_asistencia.update({
+          where: { id: eventUpdate.id },
+          data: eventUpdate.data,
+        });
+      }
+
+      await tx.tbl_asistencia_dia.update({
+        where: { id: id_asistencia_dia },
+        data: updateAsistencia,
+      });
+
+      if (eliminar_ingreso) {
+        await tx.tbl_eventos_asistencia.delete({ where: { id: asistencia.id_evento_checkin } });
+      }
+      if (eliminar_salida) {
+        await tx.tbl_eventos_asistencia.delete({ where: { id: asistencia.id_evento_checkout } });
+      }
+
+      for (const cambio of cambios) {
+        await tx.tbl_correcciones_asistencia.create({
+          data: {
+            id_asistencia_dia,
+            campo_modificado: cambio.campo,
+            valor_anterior: cambio.anterior,
+            valor_nuevo: cambio.nuevo,
+            motivo,
+            corregido_por: req.user.id,
+            user_id_registration: req.user.id,
+          },
+        });
+      }
     });
 
-    await prisma.tbl_correcciones_asistencia.create({
-      data: { id_asistencia_dia, campo_modificado: 'estado', valor_anterior: valorAnterior, valor_nuevo: nuevo_estado, motivo, corregido_por: req.user.id, user_id_registration: req.user.id },
+    const resumenCambios = cambios.map(c => `${c.campo}: "${c.anterior}" a "${c.nuevo}"`).join('; ');
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: 'CORRECCION_ASISTENCIA',
+      tipoEntidad: 'tbl_asistencia_dia',
+      idEntidad: id_asistencia_dia,
+      resumen: `Correccion: ${resumenCambios || 'sin cambios'}. Motivo: ${motivo}`,
     });
-
-    await registrarAuditoria({ userId: req.user.id, accion: 'CORRECCION_ASISTENCIA', tipoEntidad: 'tbl_asistencia_dia', idEntidad: id_asistencia_dia, resumen: `Correccion: estado de "${valorAnterior}" a "${nuevo_estado}". Motivo: ${motivo}` });
 
     res.json({ mensaje: 'Asistencia corregida' });
-  } catch (error) { res.status(500).json({ error: 'Error al corregir asistencia' }); }
+  } catch (error) {
+    console.error('Error al corregir asistencia:', error);
+    res.status(500).json({ error: 'Error al corregir asistencia' });
+  }
 };
 
 // Historial porteria (ultimos 20)
