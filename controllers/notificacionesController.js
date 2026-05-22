@@ -17,6 +17,7 @@ const listar = async (req, res) => {
       referencia_id: n.referencia_id,
       titulo: n.titulo,
       mensaje: n.cuerpo,
+      imagen_url: n.imagen_url || null,
       leida: n.leida,
       fecha: n.fecha,
       date_time_registration: n.date_time_registration,
@@ -208,7 +209,7 @@ const obtenerModalPendiente = async (req, res) => {
       },
       include: {
         tbl_notificaciones_personalizadas: {
-          select: { id: true, titulo: true, cuerpo: true },
+          select: { id: true, titulo: true, cuerpo: true, imagen_url: true },
         },
       },
       orderBy: {
@@ -218,7 +219,7 @@ const obtenerModalPendiente = async (req, res) => {
 
     if (notifPendiente) {
       const np = notifPendiente.tbl_notificaciones_personalizadas;
-      return res.json({ data: { tipo: 'notificacion_personalizada', id: np.id, titulo: np.titulo, cuerpo: np.cuerpo } });
+      return res.json({ data: { tipo: 'notificacion_personalizada', id: np.id, titulo: np.titulo, cuerpo: np.cuerpo, imagen_url: np.imagen_url || null } });
     }
 
     res.json({ data: null });

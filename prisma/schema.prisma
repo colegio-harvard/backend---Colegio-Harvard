@@ -423,6 +423,7 @@ model tbl_notificaciones {
   codigo_plantilla       String?      @db.VarChar(50)
   titulo                 String       @db.VarChar(200)
   cuerpo                 String
+  imagen_url             String?
   fecha                  DateTime     @db.Date
   leida                  Boolean      @default(false)
   user_id_registration   Int?
@@ -657,6 +658,7 @@ model tbl_notificaciones_personalizadas {
   id                                    Int                                     @id @default(autoincrement())
   titulo                                String                                  @db.VarChar(200)
   cuerpo                                String
+  imagen_url                            String?
   tipo_entrega                          String                                  @db.VarChar(10)
   tipo_audiencia                        String                                  @db.VarChar(20)
   id_ref_audiencia                      Int?

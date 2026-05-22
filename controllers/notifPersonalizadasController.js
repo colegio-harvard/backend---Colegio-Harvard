@@ -67,7 +67,7 @@ const resolverDestinatarios = async (tipo_audiencia, id_ref_audiencia) => {
 // --- Lógica compartida de envío (usada por crear inmediato y cron) ---
 
 const _enviarNotificacion = async (master, userId) => {
-  const { titulo, cuerpo, tipo_entrega, tipo_audiencia, id_ref_audiencia } = master;
+  const { titulo, cuerpo, imagen_url, tipo_entrega, tipo_audiencia, id_ref_audiencia } = master;
 
   const destinatarioIds = await resolverDestinatarios(tipo_audiencia, id_ref_audiencia);
   if (destinatarioIds.length === 0) return 0;
@@ -93,6 +93,7 @@ const _enviarNotificacion = async (master, userId) => {
           codigo_plantilla: 'NOTIF_PERSONALIZADA',
           titulo,
           cuerpo,
+          imagen_url: imagen_url || null,
           fecha: fechaHoy,
           referencia_id: master.id,
         })),
@@ -109,7 +110,7 @@ const _enviarNotificacion = async (master, userId) => {
   // Emitir socket fuera de la transacción
   if (incluyeBuzon) {
     for (const uid of destinatarioIds) {
-      emitNotificacion(uid, { titulo, cuerpo });
+      emitNotificacion(uid, { titulo, cuerpo, imagen_url: imagen_url || null });
     }
   }
 
@@ -119,7 +120,7 @@ const _enviarNotificacion = async (master, userId) => {
 // --- Crear notificación personalizada ---
 
 const crear = async (req, res) => {
-  const { titulo, cuerpo, tipo_entrega, tipo_audiencia, id_ref_audiencia, fecha_programada } = req.body;
+  const { titulo, cuerpo, imagen_url, tipo_entrega, tipo_audiencia, id_ref_audiencia, fecha_programada } = req.body;
 
   if (!titulo || !cuerpo || !tipo_entrega || !tipo_audiencia) {
     return res.status(400).json({ error: 'Titulo, cuerpo, tipo_entrega y tipo_audiencia son obligatorios' });
@@ -157,7 +158,7 @@ const crear = async (req, res) => {
       // --- PROGRAMADA: solo crear master, sin destinatarios ni buzón ---
       const master = await prisma.tbl_notificaciones_personalizadas.create({
         data: {
-          titulo, cuerpo, tipo_entrega, tipo_audiencia,
+          titulo, cuerpo, imagen_url: imagen_url || null, tipo_entrega, tipo_audiencia,
           id_ref_audiencia: id_ref_audiencia ? parseInt(id_ref_audiencia) : null,
           estado: 'PROGRAMADA',
           fecha_programada: new Date(fecha_programada + 'T00:00:00Z'),
@@ -180,7 +181,7 @@ const crear = async (req, res) => {
     // --- INMEDIATA: crear master + enviar ---
     const master = await prisma.tbl_notificaciones_personalizadas.create({
       data: {
-        titulo, cuerpo, tipo_entrega, tipo_audiencia,
+        titulo, cuerpo, imagen_url: imagen_url || null, tipo_entrega, tipo_audiencia,
         id_ref_audiencia: id_ref_audiencia ? parseInt(id_ref_audiencia) : null,
         estado: 'ENVIADA',
         creado_por: req.user.id,
@@ -285,6 +286,7 @@ const listar = async (req, res) => {
         id: n.id,
         titulo: n.titulo,
         cuerpo: n.cuerpo,
+        imagen_url: n.imagen_url || null,
         tipo_entrega: n.tipo_entrega,
         tipo_audiencia: n.tipo_audiencia,
         nombre_audiencia,
