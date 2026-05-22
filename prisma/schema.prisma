@@ -613,10 +613,11 @@ model tbl_estado_pension {
   date_time_registration DateTime?             @default(now()) @db.Timestamptz(6)
   user_id_modification   Int?
   date_time_modification DateTime?             @db.Timestamptz(6)
-  estado                 String                @default("PENDIENTE") @db.VarChar(20)
-  monto_total            Decimal?              @db.Decimal(10, 2)
-  monto_pagado           Decimal               @default(0) @db.Decimal(10, 2)
-  tbl_usuarios           tbl_usuarios          @relation(fields: [actualizado_por], references: [id], onDelete: NoAction)
+  estado                       String                @default("PENDIENTE") @db.VarChar(20)
+  monto_total                  Decimal?              @db.Decimal(10, 2)
+  monto_pagado                 Decimal               @default(0) @db.Decimal(10, 2)
+  observacion_no_corresponde   String?               @db.VarChar(255)
+  tbl_usuarios                 tbl_usuarios          @relation(fields: [actualizado_por], references: [id], onDelete: NoAction)
   tbl_alumnos            tbl_alumnos           @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
   tbl_plantilla_pension  tbl_plantilla_pension @relation(fields: [id_plantilla], references: [id], onDelete: NoAction)
   tbl_pagos_pension      tbl_pagos_pension[]

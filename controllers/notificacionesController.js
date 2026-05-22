@@ -139,7 +139,7 @@ const _checkPensionData = async (userId) => {
   const { key: mesActual, label: mesLabel } = currentMesLima();
 
   const pendientes = await prisma.tbl_estado_pension.findMany({
-    where: { id_alumno: { in: idsAlumnos }, clave_mes: mesActual, estado: { not: 'PAGADO' } },
+    where: { id_alumno: { in: idsAlumnos }, clave_mes: mesActual, estado: { in: ['PENDIENTE', 'PAGO_PARCIAL'] } },
     include: { tbl_alumnos: { select: { nombre_completo: true } } },
   });
 

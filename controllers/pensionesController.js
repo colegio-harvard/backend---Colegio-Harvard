@@ -220,6 +220,7 @@ const obtenerEstado = async (req, res) => {
             estado: e.estado,
             monto_total: e.monto_total ? Number(e.monto_total) : null,
             monto_pagado: Number(e.monto_pagado),
+            observacion_no_corresponde: e.observacion_no_corresponde || null,
             pagos: e.tbl_pagos_pension.map(p => ({
               id: p.id,
               monto: Number(p.monto),
@@ -248,6 +249,7 @@ const obtenerEstado = async (req, res) => {
       estado: e.estado,
       monto_total: e.monto_total ? Number(e.monto_total) : null,
       monto_pagado: Number(e.monto_pagado),
+      observacion_no_corresponde: e.observacion_no_corresponde || null,
       id_plantilla: e.id_plantilla,
     }));
 
@@ -299,6 +301,7 @@ const obtenerDetalleMes = async (req, res) => {
         estado: estado.estado,
         monto_total: estado.monto_total ? Number(estado.monto_total) : null,
         monto_pagado: Number(estado.monto_pagado),
+        observacion_no_corresponde: estado.observacion_no_corresponde || null,
         pagos: pagos.map(p => ({
           id: p.id,
           monto: Number(p.monto),
@@ -359,6 +362,7 @@ const registrarPago = async (req, res) => {
           estado: 'PAGADO',
           monto_total: montoTotal,
           monto_pagado: montoTotal || 0,
+          observacion_no_corresponde: null,
           actualizado_por: req.user.id,
           user_id_modification: req.user.id,
           date_time_modification: new Date(),
@@ -370,6 +374,7 @@ const registrarPago = async (req, res) => {
           estado: 'PAGADO',
           monto_total: montoTotal,
           monto_pagado: montoTotal || 0,
+          observacion_no_corresponde: null,
           actualizado_por: req.user.id,
           user_id_registration: req.user.id,
         },
@@ -414,6 +419,7 @@ const registrarPago = async (req, res) => {
           estado: nuevoEstado,
           monto_total: montoTotal,
           monto_pagado: nuevoPagado,
+          observacion_no_corresponde: null,
           actualizado_por: req.user.id,
           user_id_modification: req.user.id,
           date_time_modification: new Date(),
@@ -425,6 +431,7 @@ const registrarPago = async (req, res) => {
           estado: nuevoEstado,
           monto_total: montoTotal,
           monto_pagado: montoPago,
+          observacion_no_corresponde: null,
           actualizado_por: req.user.id,
           user_id_registration: req.user.id,
         },
@@ -442,6 +449,38 @@ const registrarPago = async (req, res) => {
         montoPagadoAcumulado: nuevoPagado,
       });
 
+    } else if (estado === 'NO_CORRESPONDE') {
+      const observacionNoCorresponde = String(observacion || '').trim();
+      if (!observacionNoCorresponde) {
+        return res.status(400).json({ error: 'La observacion es obligatoria para No Corresponde Pago' });
+      }
+
+      const ep = await prisma.tbl_estado_pension.upsert({
+        where: { id_alumno_clave_mes: { id_alumno: parseInt(id_alumno), clave_mes: String(clave_mes) } },
+        update: {
+          estado: 'NO_CORRESPONDE',
+          monto_total: null,
+          monto_pagado: 0,
+          observacion_no_corresponde: observacionNoCorresponde,
+          actualizado_por: req.user.id,
+          user_id_modification: req.user.id,
+          date_time_modification: new Date(),
+        },
+        create: {
+          id_plantilla: plantilla.id,
+          id_alumno: parseInt(id_alumno),
+          clave_mes: String(clave_mes),
+          estado: 'NO_CORRESPONDE',
+          monto_total: null,
+          monto_pagado: 0,
+          observacion_no_corresponde: observacionNoCorresponde,
+          actualizado_por: req.user.id,
+          user_id_registration: req.user.id,
+        },
+      });
+
+      await prisma.tbl_pagos_pension.deleteMany({ where: { id_estado_pension: ep.id } });
+
     } else if (estado === 'PENDIENTE') {
       // Revertir a pendiente
       if (existente) {
@@ -452,6 +491,7 @@ const registrarPago = async (req, res) => {
             estado: 'PENDIENTE',
             monto_total: null,
             monto_pagado: 0,
+            observacion_no_corresponde: null,
             actualizado_por: req.user.id,
             user_id_modification: req.user.id,
             date_time_modification: new Date(),
@@ -459,7 +499,7 @@ const registrarPago = async (req, res) => {
         });
       }
     } else {
-      return res.status(400).json({ error: 'Estado invalido. Use: PAGADO, PAGO_PARCIAL o PENDIENTE' });
+      return res.status(400).json({ error: 'Estado invalido. Use: PAGADO, PAGO_PARCIAL, NO_CORRESPONDE o PENDIENTE' });
     }
 
     await registrarAuditoria({
@@ -574,6 +614,7 @@ const cuadricula = async (req, res) => {
         estado: e.estado,
         monto_total: e.monto_total ? Number(e.monto_total) : null,
         monto_pagado: Number(e.monto_pagado),
+        observacion_no_corresponde: e.observacion_no_corresponde || null,
         id_plantilla: e.id_plantilla,
       })),
     }));
