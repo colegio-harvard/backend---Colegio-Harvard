@@ -25,11 +25,11 @@ const nombreConcepto = (plantilla, claveMes) => {
 
 const generarCodigoTicket = async () => {
   for (let i = 0; i < 8; i += 1) {
-    const codigo = `REC-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const codigo = `R${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const existe = await prisma.tbl_pagos_pension.findUnique({ where: { codigo_ticket: codigo } });
     if (!existe) return codigo;
   }
-  return `REC-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+  return `R${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 };
 
 const buildTicket = ({ codigo, pago, alumno, plantilla, estadoPension, concepto, montoTotal, montoPagadoAcumulado, observacion, usuario }) => {
