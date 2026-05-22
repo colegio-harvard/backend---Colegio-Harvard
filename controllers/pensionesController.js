@@ -1,6 +1,122 @@
 const prisma = require('../config/prisma');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { todayLima } = require('../utils/dateUtils');
+const crypto = require('crypto');
+
+const formatFechaIso = (fecha) => {
+  if (!fecha) return null;
+  return new Date(fecha).toISOString().split('T')[0];
+};
+
+const normalizarMesesPlantilla = (mesesRaw) => {
+  const meses = Array.isArray(mesesRaw) ? mesesRaw : [];
+  return meses.map(m => ({
+    clave: m.clave || m.clave_mes || m.mes || '',
+    nombre: m.nombre || m.label || m.clave || m.clave_mes || m.mes || '',
+    tipo: m.tipo || 'mes',
+    comentario: m.comentario || '',
+  })).filter(m => m.clave);
+};
+
+const nombreConcepto = (plantilla, claveMes) => {
+  const mes = normalizarMesesPlantilla(plantilla?.meses_json).find(m => m.clave === claveMes);
+  return mes?.nombre || claveMes;
+};
+
+const generarCodigoTicket = async () => {
+  for (let i = 0; i < 8; i += 1) {
+    const codigo = `REC-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const existe = await prisma.tbl_pagos_pension.findUnique({ where: { codigo_ticket: codigo } });
+    if (!existe) return codigo;
+  }
+  return `REC-${Date.now()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+};
+
+const buildTicket = ({ codigo, pago, alumno, plantilla, estadoPension, concepto, montoTotal, montoPagadoAcumulado, observacion, usuario }) => {
+  const aula = alumno?.tbl_aulas;
+  const aulaTexto = aula ? `${aula.tbl_grados?.nombre || ''} ${aula.seccion || ''}`.trim() : '';
+  const total = Number(montoTotal || 0);
+  const pagado = Number(montoPagadoAcumulado || 0);
+  const monto = Number(pago.monto || 0);
+
+  return {
+    codigo,
+    emitido_en: new Date().toISOString(),
+    fecha_pago: formatFechaIso(pago.fecha_pago),
+    alumno: {
+      id: alumno?.id || null,
+      nombre_completo: alumno?.nombre_completo || '',
+      codigo_alumno: alumno?.codigo_alumno || '',
+      dni: alumno?.dni || null,
+      aula: aulaTexto,
+      nivel: aula?.tbl_grados?.tbl_niveles?.nombre || null,
+    },
+    pension: {
+      anio_escolar: plantilla?.tbl_anios_escolares?.anio || null,
+      clave_mes: estadoPension.clave_mes,
+      concepto,
+      estado: estadoPension.estado,
+      monto_total: total,
+      monto_pagado_en_ticket: monto,
+      monto_pagado_acumulado: pagado,
+      saldo_pendiente: Math.max(total - pagado, 0),
+    },
+    observacion: observacion || null,
+    registrado_por: {
+      id: usuario?.id || null,
+      nombre: usuario?.nombres || '',
+      rol: usuario?.tbl_roles?.codigo || usuario?.tbl_roles?.nombre || '',
+    },
+  };
+};
+
+const selectAlumnoTicket = {
+  id: true,
+  nombre_completo: true,
+  codigo_alumno: true,
+  dni: true,
+  tbl_aulas: {
+    select: {
+      seccion: true,
+      tbl_grados: { select: { nombre: true, tbl_niveles: { select: { nombre: true } } } },
+    },
+  },
+};
+
+const crearPagoConTicket = async ({ estadoPension, monto, fechaPago, observacion, alumno, plantilla, usuario, montoTotal, montoPagadoAcumulado }) => {
+  const codigo = await generarCodigoTicket();
+  const pago = await prisma.tbl_pagos_pension.create({
+    data: {
+      id_estado_pension: estadoPension.id,
+      monto,
+      fecha_pago: fechaPago,
+      observacion,
+      codigo_ticket: codigo,
+      registrado_por: usuario.id,
+      user_id_registration: usuario.id,
+    },
+  });
+
+  const ticket = buildTicket({
+    codigo,
+    pago,
+    alumno,
+    plantilla,
+    estadoPension,
+    concepto: nombreConcepto(plantilla, estadoPension.clave_mes),
+    montoTotal,
+    montoPagadoAcumulado,
+    observacion,
+    usuario,
+  });
+
+  await prisma.tbl_pagos_pension.update({
+    where: { id: pago.id },
+    data: { ticket_json: { ...ticket, id_pago: pago.id } },
+  });
+
+  return { ...pago, ticket_json: { ...ticket, id_pago: pago.id } };
+};
 
 // Obtener plantilla del año activo
 const obtenerPlantilla = async (req, res) => {
@@ -81,6 +197,7 @@ const obtenerEstado = async (req, res) => {
               monto: Number(p.monto),
               fecha: p.fecha_pago.toISOString().split('T')[0],
               observacion: p.observacion,
+              codigo_ticket: p.codigo_ticket,
             })),
           })),
         });
@@ -137,6 +254,7 @@ const obtenerDetalleMes = async (req, res) => {
           monto: Number(p.monto),
           fecha: p.fecha_pago.toISOString().split('T')[0],
           observacion: p.observacion,
+          codigo_ticket: p.codigo_ticket,
         })),
       },
     });
@@ -156,14 +274,30 @@ const registrarPago = async (req, res) => {
 
   try {
     const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
-    const plantilla = await prisma.tbl_plantilla_pension.findFirst({ where: { id_anio_escolar: anioActivo.id } });
+    if (!anioActivo) return res.status(400).json({ error: 'No hay ano escolar activo' });
+    const plantilla = await prisma.tbl_plantilla_pension.findFirst({
+      where: { id_anio_escolar: anioActivo.id },
+      include: { tbl_anios_escolares: { select: { anio: true } } },
+    });
     if (!plantilla) return res.status(404).json({ error: 'No hay plantilla de pension configurada' });
+
+    const alumno = await prisma.tbl_alumnos.findUnique({
+      where: { id: parseInt(id_alumno) },
+      select: selectAlumnoTicket,
+    });
+    if (!alumno) return res.status(404).json({ error: 'Alumno no encontrado' });
+
+    const usuario = await prisma.tbl_usuarios.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, nombres: true, tbl_roles: { select: { codigo: true, nombre: true } } },
+    });
 
     const existente = await prisma.tbl_estado_pension.findUnique({
       where: { id_alumno_clave_mes: { id_alumno: parseInt(id_alumno), clave_mes: String(clave_mes) } },
     });
 
     const fechaHoy = todayLima().date;
+    let ticketEmitido = null;
 
     if (estado === 'PAGADO') {
       // Marcar como pagado completo
@@ -195,15 +329,16 @@ const registrarPago = async (req, res) => {
       if (montoTotal) {
         const montoRegistrar = existente ? montoTotal - Number(existente.monto_pagado) : montoTotal;
         if (montoRegistrar > 0) {
-          await prisma.tbl_pagos_pension.create({
-            data: {
-              id_estado_pension: ep.id,
-              monto: montoRegistrar,
-              fecha_pago: fechaHoy,
-              observacion: observacion || 'Pago completo',
-              registrado_por: req.user.id,
-              user_id_registration: req.user.id,
-            },
+          ticketEmitido = await crearPagoConTicket({
+            estadoPension: ep,
+            monto: montoRegistrar,
+            fechaPago: fechaHoy,
+            observacion: observacion || 'Pago completo',
+            alumno,
+            plantilla,
+            usuario,
+            montoTotal,
+            montoPagadoAcumulado: montoTotal,
           });
         }
       }
@@ -245,15 +380,16 @@ const registrarPago = async (req, res) => {
         },
       });
 
-      await prisma.tbl_pagos_pension.create({
-        data: {
-          id_estado_pension: ep.id,
-          monto: montoPago,
-          fecha_pago: fechaHoy,
-          observacion: observacion || null,
-          registrado_por: req.user.id,
-          user_id_registration: req.user.id,
-        },
+      ticketEmitido = await crearPagoConTicket({
+        estadoPension: ep,
+        monto: montoPago,
+        fechaPago: fechaHoy,
+        observacion: observacion || null,
+        alumno,
+        plantilla,
+        usuario,
+        montoTotal,
+        montoPagadoAcumulado: nuevoPagado,
       });
 
     } else if (estado === 'PENDIENTE') {
@@ -283,10 +419,59 @@ const registrarPago = async (req, res) => {
       resumen: `Pension alumno ${id_alumno} mes ${clave_mes}: ${estado}${monto_pago !== undefined && monto_pago !== null && monto_pago !== '' ? ` - S/. ${monto_pago}` : ''}`,
     });
 
-    res.json({ mensaje: 'Pension actualizada' });
+    res.json({
+      mensaje: 'Pension actualizada',
+      data: ticketEmitido?.ticket_json ? { ticket: ticketEmitido.ticket_json } : null,
+    });
   } catch (error) {
     console.error('Error al registrar pago:', error);
     res.status(500).json({ error: 'Error al registrar pago de pension' });
+  }
+};
+
+// Consultar ticket por codigo unico (para reimpresion/verificacion)
+const obtenerTicket = async (req, res) => {
+  const codigo = String(req.params.codigo || '').trim().toUpperCase();
+  if (!codigo) return res.status(400).json({ error: 'Codigo de ticket requerido' });
+
+  try {
+    const pago = await prisma.tbl_pagos_pension.findUnique({
+      where: { codigo_ticket: codigo },
+      include: {
+        tbl_usuarios: { select: { id: true, nombres: true, tbl_roles: { select: { codigo: true, nombre: true } } } },
+        tbl_estado_pension: {
+          include: {
+            tbl_alumnos: { select: selectAlumnoTicket },
+            tbl_plantilla_pension: { include: { tbl_anios_escolares: { select: { anio: true } } } },
+          },
+        },
+      },
+    });
+
+    if (!pago) return res.status(404).json({ error: 'Ticket no encontrado' });
+
+    if (pago.ticket_json) {
+      return res.json({ data: pago.ticket_json });
+    }
+
+    const estadoPension = pago.tbl_estado_pension;
+    const ticket = buildTicket({
+      codigo,
+      pago,
+      alumno: estadoPension.tbl_alumnos,
+      plantilla: estadoPension.tbl_plantilla_pension,
+      estadoPension,
+      concepto: nombreConcepto(estadoPension.tbl_plantilla_pension, estadoPension.clave_mes),
+      montoTotal: estadoPension.monto_total,
+      montoPagadoAcumulado: estadoPension.monto_pagado,
+      observacion: pago.observacion,
+      usuario: pago.tbl_usuarios,
+    });
+
+    return res.json({ data: { ...ticket, id_pago: pago.id } });
+  } catch (error) {
+    console.error('Error al obtener ticket:', error);
+    res.status(500).json({ error: 'Error al obtener ticket' });
   }
 };
 
@@ -423,4 +608,4 @@ const guardarPlantilla = async (req, res) => {
   }
 };
 
-module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerDetalleMes, cuadricula, guardarPlantilla };
+module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, obtenerDetalleMes, cuadricula, guardarPlantilla };

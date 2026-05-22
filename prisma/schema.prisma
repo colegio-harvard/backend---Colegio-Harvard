@@ -630,6 +630,9 @@ model tbl_pagos_pension {
   monto                  Decimal            @db.Decimal(10, 2)
   fecha_pago             DateTime           @db.Date
   observacion            String?            @db.VarChar(255)
+  codigo_ticket          String?            @unique @db.VarChar(40)
+  ticket_json            Json?
+  emitido_en             DateTime?          @default(now()) @db.Timestamptz(6)
   registrado_por         Int
   user_id_registration   Int?
   date_time_registration DateTime?          @default(now()) @db.Timestamptz(6)
