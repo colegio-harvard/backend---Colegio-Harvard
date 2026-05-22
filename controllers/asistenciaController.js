@@ -892,28 +892,107 @@ const corregirAsistencia = async (req, res) => {
   }
 };
 
-// Historial porteria (ultimos 20)
+// Historial porteria: consulta de ingresos y salidas por fecha/alumno.
 const historialPorteria = async (req, res) => {
   try {
-    const eventos = await prisma.tbl_eventos_asistencia.findMany({
-      where: { registrado_por: req.user.id },
-      include: { tbl_alumnos: { select: { nombre_completo: true, foto_url: true, tbl_aulas: { select: { seccion: true } } } } },
-      orderBy: { fecha_hora_evento: 'desc' },
-      take: 20,
+    const page = Math.max(parseInt(req.query.page || '1', 10), 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10), 1), 100);
+    const skip = (page - 1) * limit;
+    const termino = String(req.query.q || req.query.busqueda || '').trim();
+    const fechaConsulta = req.query.fecha ? parseDateOnly(req.query.fecha) : todayLima().date;
+
+    const where = { fecha_evento: fechaConsulta };
+
+    if (termino) {
+      const alumnos = await prisma.tbl_alumnos.findMany({
+        where: {
+          OR: [
+            { nombre_completo: { contains: termino, mode: 'insensitive' } },
+            { codigo_alumno: { contains: termino, mode: 'insensitive' } },
+            { dni: { contains: termino, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+        take: 100,
+      });
+
+      const ids = alumnos.map(a => a.id);
+      if (ids.length === 0) {
+        return res.json({ data: [], total: 0, page, totalPages: 1 });
+      }
+      where.id_alumno = { in: ids };
+    }
+
+    const [eventos, total] = await Promise.all([
+      prisma.tbl_eventos_asistencia.findMany({
+        where,
+        select: {
+          id: true,
+          tipo_evento: true,
+          metodo: true,
+          fecha_hora_evento: true,
+          tbl_alumnos: {
+            select: {
+              nombre_completo: true,
+              codigo_alumno: true,
+              dni: true,
+              foto_url: true,
+              tbl_aulas: {
+                select: {
+                  seccion: true,
+                  tbl_grados: {
+                    select: {
+                      nombre: true,
+                      tbl_niveles: { select: { nombre: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          tbl_usuarios: { select: { nombres: true, apellidos: true, rol: true } },
+        },
+        orderBy: { fecha_hora_evento: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.tbl_eventos_asistencia.count({ where }),
+    ]);
+
+    const data = eventos.map(e => {
+      const aula = e.tbl_alumnos?.tbl_aulas;
+      const aulaNombre = aula ? `${aula.tbl_grados?.nombre || ''} ${aula.seccion || ''}`.trim() : null;
+
+      return {
+        id: e.id,
+        tipo_evento: e.tipo_evento,
+        metodo: e.metodo,
+        fecha_hora: e.fecha_hora_evento,
+        alumno: e.tbl_alumnos ? {
+          nombre_completo: e.tbl_alumnos.nombre_completo,
+          codigo_alumno: e.tbl_alumnos.codigo_alumno,
+          dni: e.tbl_alumnos.dni,
+          foto_url: e.tbl_alumnos.foto_url,
+          aula: aulaNombre,
+          nivel: aula?.tbl_grados?.tbl_niveles?.nombre || null,
+        } : null,
+        registrado_por: e.tbl_usuarios ? {
+          nombre: `${e.tbl_usuarios.nombres || ''} ${e.tbl_usuarios.apellidos || ''}`.trim(),
+          rol: e.tbl_usuarios.rol,
+        } : null,
+      };
     });
-    const data = eventos.map(e => ({
-      id: e.id,
-      tipo_evento: e.tipo_evento,
-      metodo: e.metodo,
-      fecha_hora: e.fecha_hora_evento,
-      alumno: e.tbl_alumnos ? {
-        nombre_completo: e.tbl_alumnos.nombre_completo,
-        foto_url: e.tbl_alumnos.foto_url,
-        aula: e.tbl_alumnos.tbl_aulas?.seccion || null,
-      } : null,
-    }));
-    res.json({ data });
-  } catch (error) { res.status(500).json({ error: 'Error al obtener historial' }); }
+
+    res.json({
+      data,
+      total,
+      page,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+    });
+  } catch (error) {
+    console.error('Error al obtener historial de porteria:', error);
+    res.status(500).json({ error: 'Error al obtener historial' });
+  }
 };
 
 // Dashboard Admin: resumen general del dia
