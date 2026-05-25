@@ -114,9 +114,16 @@ const analizarExcelPensiones = async (buffer) => {
 
   const porCodigo = new Map();
   const porDni = new Map();
+  const nombreCounts = new Map();
+  const porNombre = new Map();
   for (const alumno of alumnos) {
     if (alumno.codigo_alumno) porCodigo.set(normalizarTexto(alumno.codigo_alumno), alumno);
     if (alumno.dni) porDni.set(normalizarTexto(alumno.dni), alumno);
+    if (alumno.nombre_completo) {
+      const nombreKey = normalizarTexto(alumno.nombre_completo);
+      nombreCounts.set(nombreKey, (nombreCounts.get(nombreKey) || 0) + 1);
+      porNombre.set(nombreKey, alumno);
+    }
   }
 
   const coincidencias = [];
@@ -141,8 +148,21 @@ const analizarExcelPensiones = async (buffer) => {
     if (!codigo && !dni && !nombre) continue;
 
     resumen.filas_excel += 1;
-    const alumno = (codigo ? porCodigo.get(normalizarTexto(codigo)) : null)
-      || (dni ? porDni.get(normalizarTexto(dni)) : null);
+    let matchBy = null;
+    let alumno = null;
+    if (codigo && porCodigo.has(normalizarTexto(codigo))) {
+      alumno = porCodigo.get(normalizarTexto(codigo));
+      matchBy = 'codigo';
+    } else if (dni && porDni.has(normalizarTexto(dni))) {
+      alumno = porDni.get(normalizarTexto(dni));
+      matchBy = 'dni';
+    } else if (nombre) {
+      const nombreKey = normalizarTexto(nombre);
+      if (nombreCounts.get(nombreKey) === 1) {
+        alumno = porNombre.get(nombreKey);
+        matchBy = 'nombre';
+      }
+    }
 
     if (!alumno) {
       noEncontrados.push({ codigo_alumno: codigo || '', dni: dni || '', nombre_completo: nombre || '' });
@@ -190,6 +210,7 @@ const analizarExcelPensiones = async (buffer) => {
         dni: alumno.dni,
         nombre_completo: alumno.nombre_completo,
       },
+      coincidencia_por: matchBy,
       excel: { codigo_alumno: codigo || '', dni: dni || '', nombre_completo: nombre || '' },
       cambios_montos: cambiosMontos,
       pagos_nuevos: pagosNuevos,
