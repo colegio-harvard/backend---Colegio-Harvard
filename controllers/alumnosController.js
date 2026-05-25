@@ -50,7 +50,7 @@ const listar = async (req, res) => {
       where,
       include: {
         tbl_aulas: { include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } } },
-        tbl_padres_alumnos: { include: { tbl_padres: { select: { id: true, nombre_completo: true, dni: true } } } },
+        tbl_padres_alumnos: { include: { tbl_padres: { select: { id: true, nombre_completo: true, dni: true, celular: true } } } },
         tbl_carnets: { select: { id: true, qr_token: true, version_carnet: true } },
       },
       orderBy: { nombre_completo: 'asc' },
@@ -81,6 +81,7 @@ const listar = async (req, res) => {
           id: a.tbl_padres_alumnos.tbl_padres.id,
           nombre_completo: a.tbl_padres_alumnos.tbl_padres.nombre_completo,
           dni: a.tbl_padres_alumnos.tbl_padres.dni,
+          celular: a.tbl_padres_alumnos.tbl_padres.celular,
         } : null,
       }] : [],
       carnet: a.tbl_carnets ? {
