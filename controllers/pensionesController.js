@@ -29,6 +29,13 @@ const nombreConcepto = (plantilla, claveMes) => {
   return mes?.nombre || claveMes;
 };
 
+const montoBaseConceptoAlumno = (alumno, claveMes) => {
+  const clave = normalizarTexto(claveMes);
+  if (clave === 'MATRICULA') return alumno.monto_matricula;
+  if (clave === 'MATERIALES') return alumno.monto_materiales;
+  return alumno.monto_pension;
+};
+
 const normalizarTexto = (value) => String(value || '')
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
@@ -1184,6 +1191,128 @@ const exportarReportePagosExcel = async (_req, res) => {
   }
 };
 
+const exportarDeudoresConceptoExcel = async (req, res) => {
+  const { concepto, id_aula, id_grado, id_nivel } = req.query;
+
+  try {
+    if (!concepto) return res.status(400).json({ error: 'Seleccione un concepto de cobro' });
+
+    const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
+    if (!anioActivo) return res.status(400).json({ error: 'No hay ano escolar activo' });
+
+    const plantilla = await prisma.tbl_plantilla_pension.findFirst({
+      where: { id_anio_escolar: anioActivo.id },
+    });
+    if (!plantilla) return res.status(404).json({ error: 'No hay plantilla de pension configurada' });
+
+    const conceptos = normalizarMesesPlantilla(plantilla.meses_json);
+    const conceptoSeleccionado = conceptos.find(c => c.clave === concepto);
+    if (!conceptoSeleccionado) return res.status(404).json({ error: 'Concepto no encontrado en la plantilla' });
+
+    const where = { estado: 'ACTIVO' };
+    if (id_aula) {
+      where.id_aula = parseInt(id_aula);
+    } else if (id_grado) {
+      where.tbl_aulas = { id_grado: parseInt(id_grado) };
+    } else if (id_nivel) {
+      where.tbl_aulas = { tbl_grados: { id_nivel: parseInt(id_nivel) } };
+    }
+
+    const alumnos = await prisma.tbl_alumnos.findMany({
+      where,
+      include: {
+        tbl_aulas: { include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } } },
+        tbl_padres_alumnos: { include: { tbl_padres: { select: { nombre_completo: true, dni: true, celular: true } } } },
+        tbl_estado_pension: {
+          where: { id_plantilla: plantilla.id, clave_mes: conceptoSeleccionado.clave },
+          include: {
+            tbl_pagos_pension: {
+              include: { tbl_usuarios: { select: { nombres: true } } },
+              orderBy: { fecha_pago: 'asc' },
+            },
+          },
+        },
+      },
+      orderBy: { nombre_completo: 'asc' },
+    });
+
+    const rows = [];
+    for (const alumno of alumnos) {
+      const estado = alumno.tbl_estado_pension?.[0] || null;
+      const estadoTexto = estado?.estado || 'PENDIENTE';
+      if (estadoTexto === 'PAGADO' || estadoTexto === 'NO_CORRESPONDE') continue;
+
+      const totalRaw = estado?.monto_total ?? montoBaseConceptoAlumno(alumno, conceptoSeleccionado.clave);
+      const total = Number(totalRaw || 0);
+      const pagado = Number(estado?.monto_pagado || 0);
+      const saldo = Math.max(total - pagado, 0);
+      if (saldo <= 0 && estadoTexto !== 'PENDIENTE') continue;
+
+      const aula = alumno.tbl_aulas;
+      const grado = aula?.tbl_grados;
+      const nivel = grado?.tbl_niveles?.nombre || '';
+      const padre = alumno.tbl_padres_alumnos?.tbl_padres;
+      const pagos = estado?.tbl_pagos_pension || [];
+      const ultimoPago = pagos[pagos.length - 1] || null;
+      const observaciones = pagos
+        .filter(p => p.observacion)
+        .map(p => {
+          const fecha = p.fecha_pago ? p.fecha_pago.toISOString().split('T')[0] : 'Sin fecha';
+          return `${fecha}: ${p.observacion}`;
+        })
+        .join(' | ');
+
+      rows.push({
+        Nivel: nivel,
+        Grado: grado?.nombre || '',
+        Seccion: aula?.seccion || '',
+        Aula: grado ? `${grado.nombre} ${aula?.seccion || ''}`.trim() : '',
+        Codigo_Alumno: alumno.codigo_alumno,
+        DNI_Alumno: alumno.dni || '',
+        Alumno: alumno.nombre_completo,
+        Apoderado: padre?.nombre_completo || '',
+        DNI_Apoderado: padre?.dni || '',
+        Celular_Apoderado: padre?.celular || '',
+        Concepto: conceptoSeleccionado.nombre,
+        Estado: estadoTexto === 'PAGO_PARCIAL' ? 'PAGO PARCIAL' : 'PENDIENTE',
+        Monto_Total: total,
+        Total_Pagado: pagado,
+        Saldo_Pendiente: saldo,
+        Fecha_Ultimo_Pago: ultimoPago?.fecha_pago ? ultimoPago.fecha_pago.toISOString().split('T')[0] : '',
+        Monto_Ultimo_Pago: ultimoPago ? Number(ultimoPago.monto || 0) : '',
+        Observacion: observaciones,
+      });
+    }
+
+    const resumen = [{
+      Fecha_Consulta: new Date().toISOString(),
+      Anio_Escolar: anioActivo.anio,
+      Concepto: conceptoSeleccionado.nombre,
+      Alumnos_Deudores: rows.length,
+      Saldo_Total: rows.reduce((sum, row) => sum + Number(row.Saldo_Pendiente || 0), 0),
+    }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), 'Resumen');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Deudores');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const nombreArchivo = String(conceptoSeleccionado.nombre || conceptoSeleccionado.clave)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase();
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=deudores-${nombreArchivo || conceptoSeleccionado.clave}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Error al exportar deudores por concepto:', error);
+    res.status(500).json({ error: 'Error al exportar deudores por concepto' });
+  }
+};
+
 // Admin crea/actualiza plantilla de pension
 const guardarPlantilla = async (req, res) => {
   const { meses } = req.body;
@@ -1418,4 +1547,4 @@ const aplicarImportacionExcel = async (req, res) => {
   }
 };
 
-module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, listarTickets, obtenerDetalleMes, cuadricula, exportarReportePagosExcel, guardarPlantilla, previewImportacionExcel, aplicarImportacionExcel };
+module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, listarTickets, obtenerDetalleMes, cuadricula, exportarReportePagosExcel, exportarDeudoresConceptoExcel, guardarPlantilla, previewImportacionExcel, aplicarImportacionExcel };
