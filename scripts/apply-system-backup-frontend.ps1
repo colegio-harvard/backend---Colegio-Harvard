@@ -124,7 +124,12 @@ $newHeader = @'
 if ($content.Contains($oldHeader)) {
   $content = $content.Replace($oldHeader, $newHeader)
 } elseif ($content -notmatch "Respaldar sistema") {
-  throw "No se encontro el encabezado esperado del dashboard."
+  $headerPattern = '(?s)<div className="flex items-center justify-between mb-6">\s*<h1 className="page-title">Dashboard</h1>\s*<span className="text-sm text-gold-600 font-medium">\s*\{new Date\(\)\.toLocaleDateString\(''es-PE'', \{ timeZone: ''America/Lima'', weekday: ''long'', day: ''numeric'', month: ''long'', year: ''numeric'' \}\)\}\s*</span>\s*</div>'
+  $updated = [regex]::Replace($content, $headerPattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $newHeader }, 1)
+  if ($updated -eq $content) {
+    throw "No se encontro el encabezado esperado del dashboard."
+  }
+  $content = $updated
 }
 
 Write-FileUtf8NoBom -Path $dashboardPath -Content $content
