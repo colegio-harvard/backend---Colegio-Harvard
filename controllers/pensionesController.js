@@ -1313,6 +1313,223 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
   }
 };
 
+const dashboardPensiones = async (_req, res) => {
+  try {
+    const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
+    if (!anioActivo) return res.status(400).json({ error: 'No hay ano escolar activo' });
+
+    const plantilla = await prisma.tbl_plantilla_pension.findFirst({
+      where: { id_anio_escolar: anioActivo.id },
+    });
+    if (!plantilla) return res.status(404).json({ error: 'No hay plantilla de pension configurada' });
+
+    const conceptos = normalizarMesesPlantilla(plantilla.meses_json);
+    const alumnos = await prisma.tbl_alumnos.findMany({
+      where: { estado: 'ACTIVO' },
+      include: {
+        tbl_aulas: { include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } } },
+        tbl_padres_alumnos: { include: { tbl_padres: { select: { nombre_completo: true, celular: true } } } },
+        tbl_estado_pension: {
+          where: { id_plantilla: plantilla.id },
+          include: { tbl_pagos_pension: { orderBy: { fecha_pago: 'asc' } } },
+        },
+      },
+      orderBy: { nombre_completo: 'asc' },
+    });
+
+    const conceptoMap = new Map(conceptos.map(c => [c.clave, {
+      clave: c.clave,
+      nombre: c.nombre,
+      proyectado: 0,
+      cobrado: 0,
+      saldo: 0,
+      pagados: 0,
+      parciales: 0,
+      pendientes: 0,
+      no_corresponde: 0,
+      deudores: [],
+    }]));
+    const aulaMap = new Map();
+    const deudoresPorAlumno = new Map();
+
+    let proyectado = 0;
+    let cobrado = 0;
+    let saldo = 0;
+    let pagosParciales = 0;
+    let conceptosNoCorresponde = 0;
+    let conceptosPendientes = 0;
+
+    for (const alumno of alumnos) {
+      const aula = alumno.tbl_aulas;
+      const grado = aula?.tbl_grados;
+      const nivel = grado?.tbl_niveles?.nombre || '';
+      const aulaNombre = grado ? `${grado.nombre} ${aula?.seccion || ''}`.trim() : 'Sin aula';
+      const aulaKey = aula?.id || 'sin-aula';
+      if (!aulaMap.has(aulaKey)) {
+        aulaMap.set(aulaKey, {
+          id_aula: aula?.id || null,
+          aula: aulaNombre,
+          nivel,
+          grado: grado?.nombre || '',
+          seccion: aula?.seccion || '',
+          alumnos: new Set(),
+          deudores: new Set(),
+          proyectado: 0,
+          cobrado: 0,
+          saldo: 0,
+        });
+      }
+      const aulaStats = aulaMap.get(aulaKey);
+      aulaStats.alumnos.add(alumno.id);
+
+      const estados = new Map((alumno.tbl_estado_pension || []).map(e => [e.clave_mes, e]));
+      let saldoAlumno = 0;
+      let pagadoAlumno = 0;
+
+      for (const concepto of conceptos) {
+        const stats = conceptoMap.get(concepto.clave);
+        const estado = estados.get(concepto.clave);
+        const estadoTexto = estado?.estado || 'PENDIENTE';
+        const total = Number((estado?.monto_total ?? montoBaseConceptoAlumno(alumno, concepto.clave)) || 0);
+        const pagado = Number(estado?.monto_pagado || 0);
+        const deuda = (estadoTexto === 'PENDIENTE' || estadoTexto === 'PAGO_PARCIAL') ? Math.max(total - pagado, 0) : 0;
+
+        if (estadoTexto !== 'NO_CORRESPONDE') {
+          proyectado += total;
+          stats.proyectado += total;
+          aulaStats.proyectado += total;
+        } else {
+          conceptosNoCorresponde += 1;
+          stats.no_corresponde += 1;
+        }
+
+        cobrado += pagado;
+        stats.cobrado += pagado;
+        aulaStats.cobrado += pagado;
+        saldo += deuda;
+        stats.saldo += deuda;
+        aulaStats.saldo += deuda;
+        saldoAlumno += deuda;
+        pagadoAlumno += pagado;
+
+        if (estadoTexto === 'PAGADO') stats.pagados += 1;
+        else if (estadoTexto === 'PAGO_PARCIAL') {
+          stats.parciales += 1;
+          pagosParciales += 1;
+        } else if (estadoTexto === 'PENDIENTE') {
+          stats.pendientes += 1;
+          conceptosPendientes += 1;
+        }
+
+        if (deuda > 0) {
+          aulaStats.deudores.add(alumno.id);
+          stats.deudores.push({
+            id_alumno: alumno.id,
+            codigo_alumno: alumno.codigo_alumno,
+            alumno: alumno.nombre_completo,
+            aula: aulaNombre,
+            apoderado: alumno.tbl_padres_alumnos?.tbl_padres?.nombre_completo || '',
+            celular: alumno.tbl_padres_alumnos?.tbl_padres?.celular || '',
+            estado: estadoTexto,
+            total,
+            pagado,
+            saldo: deuda,
+          });
+        }
+      }
+
+      if (saldoAlumno > 0) {
+        deudoresPorAlumno.set(alumno.id, {
+          id_alumno: alumno.id,
+          codigo_alumno: alumno.codigo_alumno,
+          alumno: alumno.nombre_completo,
+          aula: aulaNombre,
+          apoderado: alumno.tbl_padres_alumnos?.tbl_padres?.nombre_completo || '',
+          celular: alumno.tbl_padres_alumnos?.tbl_padres?.celular || '',
+          pagado: pagadoAlumno,
+          saldo: saldoAlumno,
+        });
+      }
+    }
+
+    const pagosRecientes = await prisma.tbl_pagos_pension.findMany({
+      take: 10,
+      orderBy: { fecha_pago: 'desc' },
+      include: {
+        tbl_usuarios: { select: { nombres: true } },
+        tbl_estado_pension: {
+          include: {
+            tbl_alumnos: {
+              include: { tbl_aulas: { include: { tbl_grados: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    const conceptosResumen = Array.from(conceptoMap.values()).map(c => ({
+      ...c,
+      porcentaje_cobranza: c.proyectado > 0 ? Math.round((c.cobrado / c.proyectado) * 100) : 0,
+      deudores_count: c.deudores.length,
+      deudores: c.deudores.sort((a, b) => b.saldo - a.saldo).slice(0, 50),
+    }));
+
+    const deudaPorAula = Array.from(aulaMap.values()).map(a => ({
+      ...a,
+      alumnos: a.alumnos.size,
+      deudores: a.deudores.size,
+      porcentaje_cobranza: a.proyectado > 0 ? Math.round((a.cobrado / a.proyectado) * 100) : 0,
+    })).sort((a, b) => b.saldo - a.saldo);
+
+    const topDeudores = Array.from(deudoresPorAlumno.values())
+      .sort((a, b) => b.saldo - a.saldo)
+      .slice(0, 10);
+
+    const pagos = pagosRecientes.map(p => {
+      const estado = p.tbl_estado_pension;
+      const alumno = estado?.tbl_alumnos;
+      const aula = alumno?.tbl_aulas;
+      return {
+        id: p.id,
+        codigo_ticket: p.codigo_ticket,
+        fecha_pago: p.fecha_pago,
+        alumno: alumno?.nombre_completo || '',
+        codigo_alumno: alumno?.codigo_alumno || '',
+        aula: aula?.tbl_grados ? `${aula.tbl_grados.nombre} ${aula.seccion || ''}`.trim() : '',
+        concepto: nombreConcepto(plantilla, estado?.clave_mes),
+        monto: Number(p.monto || 0),
+        observacion: p.observacion || '',
+        registrado_por: p.tbl_usuarios?.nombres || '',
+      };
+    });
+
+    res.json({
+      data: {
+        anio: anioActivo.anio,
+        resumen: {
+          alumnos: alumnos.length,
+          alumnos_al_dia: alumnos.length - deudoresPorAlumno.size,
+          alumnos_con_deuda: deudoresPorAlumno.size,
+          proyectado,
+          cobrado,
+          saldo,
+          porcentaje_cobranza: proyectado > 0 ? Math.round((cobrado / proyectado) * 100) : 0,
+          pagos_parciales: pagosParciales,
+          conceptos_pendientes: conceptosPendientes,
+          no_corresponde: conceptosNoCorresponde,
+        },
+        conceptos: conceptosResumen,
+        deuda_por_aula: deudaPorAula,
+        top_deudores: topDeudores,
+        pagos_recientes: pagos,
+      },
+    });
+  } catch (error) {
+    console.error('Error dashboard pensiones:', error);
+    res.status(500).json({ error: 'Error al obtener dashboard de pensiones' });
+  }
+};
+
 // Admin crea/actualiza plantilla de pension
 const guardarPlantilla = async (req, res) => {
   const { meses } = req.body;
@@ -1547,4 +1764,4 @@ const aplicarImportacionExcel = async (req, res) => {
   }
 };
 
-module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, listarTickets, obtenerDetalleMes, cuadricula, exportarReportePagosExcel, exportarDeudoresConceptoExcel, guardarPlantilla, previewImportacionExcel, aplicarImportacionExcel };
+module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, listarTickets, obtenerDetalleMes, cuadricula, exportarReportePagosExcel, exportarDeudoresConceptoExcel, dashboardPensiones, guardarPlantilla, previewImportacionExcel, aplicarImportacionExcel };

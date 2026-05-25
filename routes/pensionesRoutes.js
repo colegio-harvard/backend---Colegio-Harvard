@@ -25,6 +25,7 @@ router.get('/estado/:id_alumno', verificarToken, ctrl.obtenerEstado);
 router.post('/registrar-pago', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.registrarPago);
 router.get('/detalle/:id_alumno/:clave_mes', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.obtenerDetalleMes);
 router.get('/cuadricula', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.cuadricula);
+router.get('/dashboard', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.dashboardPensiones);
 router.get('/reporte-pagos/exportar-excel', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.exportarReportePagosExcel);
 router.get('/deudores/exportar-excel', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.exportarDeudoresConceptoExcel);
 router.post('/importar-excel/preview', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), uploadExcel.single('archivo'), ctrl.previewImportacionExcel);
