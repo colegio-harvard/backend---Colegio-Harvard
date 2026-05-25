@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { findUserByUsername, incrementFailedAttempts, resetFailedAttempts, parentHasLink } = require('../models/authModel');
+const { registrarAuditoria } = require('../middleware/auditMiddleware');
 
 const login = async (req, res) => {
   const { username, contrasena } = req.body;
@@ -21,6 +22,15 @@ const login = async (req, res) => {
       const ahora = new Date();
       if (ahora < new Date(usuario.bloqueado_hasta)) {
         const minutosRestantes = Math.ceil((new Date(usuario.bloqueado_hasta) - ahora) / 60000);
+        await registrarAuditoria({
+          userId: usuario.id,
+          accion: 'LOGIN_BLOQUEADO',
+          tipoEntidad: 'tbl_usuarios',
+          idEntidad: usuario.id,
+          resumen: `Intento de login con cuenta bloqueada: ${usuario.username}`,
+          req,
+          meta: { minutos_restantes: minutosRestantes },
+        });
         return res.status(423).json({
           error: `Cuenta bloqueada temporalmente. Intente en ${minutosRestantes} minuto(s).`
         });
@@ -30,6 +40,14 @@ const login = async (req, res) => {
     }
 
     if (usuario.estado === 'BLOQUEADO' && !usuario.bloqueado_hasta) {
+      await registrarAuditoria({
+        userId: usuario.id,
+        accion: 'LOGIN_BLOQUEADO',
+        tipoEntidad: 'tbl_usuarios',
+        idEntidad: usuario.id,
+        resumen: `Intento de login con cuenta bloqueada permanente: ${usuario.username}`,
+        req,
+      });
       return res.status(403).json({ error: 'Cuenta bloqueada. Contacte al administrador.' });
     }
 
@@ -38,6 +56,15 @@ const login = async (req, res) => {
     if (!coincide) {
       await incrementFailedAttempts(usuario.id, usuario.intentos_fallidos);
       const restantes = 5 - (usuario.intentos_fallidos + 1);
+      await registrarAuditoria({
+        userId: usuario.id,
+        accion: restantes > 0 ? 'LOGIN_FALLIDO' : 'LOGIN_BLOQUEADO',
+        tipoEntidad: 'tbl_usuarios',
+        idEntidad: usuario.id,
+        resumen: `Login fallido para usuario ${usuario.username}`,
+        req,
+        meta: { intentos_fallidos: usuario.intentos_fallidos + 1, restantes: Math.max(restantes, 0) },
+      });
       if (restantes > 0) {
         return res.status(401).json({ error: `Contrasena incorrecta. ${restantes} intento(s) restante(s).` });
       }
@@ -48,12 +75,29 @@ const login = async (req, res) => {
     if (usuario.rol_codigo === 'PADRE') {
       const tieneVinculo = await parentHasLink(usuario.id);
       if (!tieneVinculo) {
+        await registrarAuditoria({
+          userId: usuario.id,
+          accion: 'LOGIN_PADRE_SIN_VINCULO',
+          tipoEntidad: 'tbl_usuarios',
+          idEntidad: usuario.id,
+          resumen: `Padre sin alumnos vinculados intento ingresar: ${usuario.username}`,
+          req,
+        });
         return res.status(403).json({ error: 'Su cuenta aun no tiene alumnos vinculados. Contacte al administrador.' });
       }
     }
 
     // Login exitoso - resetear intentos
     await resetFailedAttempts(usuario.id);
+    await registrarAuditoria({
+      userId: usuario.id,
+      accion: 'LOGIN_EXITOSO',
+      tipoEntidad: 'tbl_usuarios',
+      idEntidad: usuario.id,
+      resumen: `Login exitoso: ${usuario.username}`,
+      req,
+      meta: { rol: usuario.rol_codigo },
+    });
 
     // Generar token
     const token = jwt.sign(

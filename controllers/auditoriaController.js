@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const XLSX = require('xlsx');
+const { registrarAuditoria } = require('../middleware/auditMiddleware');
 
 const listar = async (req, res) => {
   const { fecha_inicio, fecha_fin, codigo_accion, id_usuario_actor } = req.query;
@@ -13,7 +14,7 @@ const listar = async (req, res) => {
 
     const logs = await prisma.tbl_auditoria.findMany({
       where,
-      include: { tbl_usuarios: { select: { nombres: true, username: true } } },
+      include: { tbl_usuarios: { select: { nombres: true, username: true, tbl_roles: { select: { codigo: true, nombre: true } } } } },
       orderBy: { marca_tiempo: 'desc' },
       take: 500,
     });
@@ -29,7 +30,10 @@ const listar = async (req, res) => {
       usuario: l.tbl_usuarios ? {
         nombres: l.tbl_usuarios.nombres,
         username: l.tbl_usuarios.username,
+        rol_codigo: l.tbl_usuarios.tbl_roles?.codigo || null,
+        rol_nombre: l.tbl_usuarios.tbl_roles?.nombre || null,
       } : null,
+      meta: l.meta_json || null,
     }));
 
     res.json({ data });
@@ -56,7 +60,7 @@ const exportarExcel = async (req, res) => {
 
     const logs = await prisma.tbl_auditoria.findMany({
       where,
-      include: { tbl_usuarios: { select: { nombres: true, username: true } } },
+      include: { tbl_usuarios: { select: { nombres: true, username: true, tbl_roles: { select: { codigo: true, nombre: true } } } } },
       orderBy: { marca_tiempo: 'desc' },
       take: 5000,
     });
@@ -65,16 +69,27 @@ const exportarExcel = async (req, res) => {
       Fecha: l.marca_tiempo ? new Date(l.marca_tiempo).toLocaleString('es-PE', { timeZone: 'America/Lima' }) : '',
       Usuario: l.tbl_usuarios?.nombres || '',
       Username: l.tbl_usuarios?.username || '',
+      Rol: l.tbl_usuarios?.tbl_roles?.codigo || '',
       Accion: l.codigo_accion,
       Entidad: l.tipo_entidad || '',
       'ID Entidad': l.id_entidad || '',
       Resumen: l.resumen || '',
+      Detalle_JSON: l.meta_json ? JSON.stringify(l.meta_json) : '',
     }));
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'Auditoria');
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: 'EXPORTAR_AUDITORIA_EXCEL',
+      tipoEntidad: 'tbl_auditoria',
+      resumen: `Exportacion de auditoria a Excel (${rows.length} registros)`,
+      req,
+      meta: { filtros: { fecha_inicio, fecha_fin, codigo_accion }, registros: rows.length },
+    });
 
     res.setHeader('Content-Disposition', 'attachment; filename=auditoria.xlsx');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

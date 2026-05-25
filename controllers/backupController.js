@@ -203,6 +203,7 @@ const descargarSistema = async (req, res) => {
       tipoEntidad: 'SISTEMA',
       idEntidad: null,
       resumen: `Descarga de respaldo completo (${resumenTablas.length} tablas, ${(buffer.length / 1024 / 1024).toFixed(2)} MB)`,
+      req,
       meta: {
         generated_at: generatedAt.toISOString(),
         tablas: resumenTablas.length,

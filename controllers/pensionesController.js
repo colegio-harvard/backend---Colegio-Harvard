@@ -1058,7 +1058,7 @@ const cuadricula = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al obtener cuadricula' }); }
 };
 
-const exportarReportePagosExcel = async (_req, res) => {
+const exportarReportePagosExcel = async (req, res) => {
   try {
     const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
     if (!anioActivo) return res.status(400).json({ error: 'No hay ano escolar activo' });
@@ -1182,6 +1182,20 @@ const exportarReportePagosExcel = async (_req, res) => {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(historial), 'Historial pagos');
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: 'EXPORTAR_REPORTE_PAGOS_EXCEL',
+      tipoEntidad: 'tbl_estado_pension',
+      resumen: `Exportacion de reporte general de pagos (${matriz.length} alumnos)`,
+      req,
+      meta: {
+        anio: anioActivo.anio,
+        alumnos: matriz.length,
+        pagos_historial: historial.length,
+        saldo: totales.saldo,
+      },
+    });
+
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename=reporte-pagos-${anioActivo.anio}.xlsx`);
     res.send(buffer);
@@ -1296,6 +1310,22 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), 'Resumen');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Deudores');
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: 'EXPORTAR_DEUDORES_PENSION',
+      tipoEntidad: 'tbl_estado_pension',
+      resumen: `Exportacion de deudores para ${conceptoSeleccionado.nombre}: ${rows.length} alumnos`,
+      req,
+      meta: {
+        anio: anioActivo.anio,
+        concepto: conceptoSeleccionado.clave,
+        concepto_nombre: conceptoSeleccionado.nombre,
+        deudores: rows.length,
+        saldo_total: resumen[0].Saldo_Total,
+        filtros: { id_aula, id_grado, id_nivel },
+      },
+    });
 
     const nombreArchivo = String(conceptoSeleccionado.nombre || conceptoSeleccionado.clave)
       .normalize('NFD')
