@@ -53,7 +53,19 @@ const normalizarSeccion = (value) => {
 
 const normalizarGradoImportacion = (value) => normalizarTexto(value)
   .replace(/\bGRADO\b/g, '')
-  .replace(/\bANOS\b/g, 'AÑOS')
+  .replace(/\bANOS\b/g, 'ANIOS')
+  .replace(/\bAÑOS\b/g, 'ANIOS')
+  .replace(/\bANIO\b/g, 'ANIOS')
+  .replace(/\bAÑO\b/g, 'ANIOS')
+  .replace(/\bPRIMERO\b/g, '1RO')
+  .replace(/\bSEGUNDO\b/g, '2DO')
+  .replace(/\bTERCERO\b/g, '3RO')
+  .replace(/\bCUARTO\b/g, '4TO')
+  .replace(/\bQUINTO\b/g, '5TO')
+  .replace(/\bSEXTO\b/g, '6TO')
+  .replace(/\b1ER\b/g, '1RO')
+  .replace(/\b1ERO\b/g, '1RO')
+  .replace(/\b3ER\b/g, '3RO')
   .replace(/\s+/g, ' ')
   .trim();
 
@@ -125,6 +137,18 @@ const resolverAulaImportacion = (row, headerMap, aulas) => {
   const aulaA = candidatas.find(a => normalizarSeccion(a.seccion) === 'A');
   if (aulaA) return { aula: aulaA, nivel, grado, seccion: aulaA.seccion, motivo: null };
 
+  const gradoKey = normalizarGradoImportacion(grado);
+  const porGrado = aulas.porGrado.get(gradoKey) || [];
+  const porGradoSeccion = porGrado.filter(a => normalizarSeccion(a.seccion) === normalizarSeccion(seccion));
+  if (porGradoSeccion.length === 1) {
+    return { aula: porGradoSeccion[0], nivel, grado, seccion: porGradoSeccion[0].seccion, motivo: null };
+  }
+  if (porGrado.length === 1) {
+    return { aula: porGrado[0], nivel, grado, seccion: porGrado[0].seccion, motivo: null };
+  }
+  const porGradoA = porGrado.find(a => normalizarSeccion(a.seccion) === 'A');
+  if (porGradoA) return { aula: porGradoA, nivel, grado, seccion: porGradoA.seccion, motivo: null };
+
   return {
     aula: null,
     nivel,
@@ -162,7 +186,7 @@ const analizarExcelPensiones = async (buffer) => {
   const aulasDb = await prisma.tbl_aulas.findMany({
     include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } },
   });
-  const aulas = { porKey: new Map(), porNivelGrado: new Map() };
+  const aulas = { porKey: new Map(), porNivelGrado: new Map(), porGrado: new Map() };
   for (const aula of aulasDb) {
     const nivel = aula.tbl_grados?.tbl_niveles?.nombre || '';
     const grado = aula.tbl_grados?.nombre || '';
@@ -172,6 +196,10 @@ const analizarExcelPensiones = async (buffer) => {
     const lista = aulas.porNivelGrado.get(baseKey) || [];
     lista.push(aula);
     aulas.porNivelGrado.set(baseKey, lista);
+    const gradoKey = normalizarGradoImportacion(grado);
+    const listaGrado = aulas.porGrado.get(gradoKey) || [];
+    listaGrado.push(aula);
+    aulas.porGrado.set(gradoKey, listaGrado);
   }
 
   const porCodigo = new Map();
