@@ -136,7 +136,13 @@ Write-FileUtf8NoBom -Path $dashboardPath -Content $content
 
 Push-Location $FrontendDir
 try {
-  npm run build
+  $npm = Get-Command npm -ErrorAction SilentlyContinue
+  if ($npm) {
+    npm run build
+  } else {
+    Write-Warning "npm no esta disponible en esta terminal. Se omitio la compilacion local; Railway compilara al desplegar."
+  }
+
   if ($Publish) {
     git add src/services/backupService.js src/pages/dashboards/DashboardAdmin.jsx
     git commit -m "Add full system backup download"
