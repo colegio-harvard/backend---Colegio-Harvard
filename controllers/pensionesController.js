@@ -160,7 +160,6 @@ const analizarExcelPensiones = async (buffer) => {
     },
   });
   const aulasDb = await prisma.tbl_aulas.findMany({
-    where: { id_anio_escolar: anioActivo.id },
     include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } },
   });
   const aulas = { porKey: new Map(), porNivelGrado: new Map() };
