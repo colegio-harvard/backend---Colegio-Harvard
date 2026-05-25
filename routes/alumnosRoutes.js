@@ -17,6 +17,7 @@ const upload = multer({
 });
 
 router.get('/', verificarToken, ctrl.listar);
+router.get('/siguiente-codigo', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.siguienteCodigo);
 router.post('/', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), upload.single('foto'), ctrl.crear);
 router.post('/vincular', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.vincularPadre);
 router.get('/carnet/:id_alumno', verificarToken, ctrl.obtenerCarnet);

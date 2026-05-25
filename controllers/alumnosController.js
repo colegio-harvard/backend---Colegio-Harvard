@@ -6,11 +6,36 @@ const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { validarContrasena } = require('../utils/validaciones');
 const { uploadFile } = require('../utils/storageService');
 
-const parseMontoPension = (value) => {
+const parseMonto = (value) => {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
   const parsed = parseFloat(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : NaN;
+};
+
+const extraerNumeroCodigoAlumno = (codigo) => {
+  const match = /^H(\d+)$/i.exec(String(codigo || '').trim());
+  return match ? parseInt(match[1], 10) : null;
+};
+
+const calcularSiguienteCodigoAlumno = async (tx = prisma) => {
+  const alumnos = await tx.tbl_alumnos.findMany({
+    where: {
+      estado: { not: 'DELETED' },
+      codigo_alumno: { startsWith: 'H', mode: 'insensitive' },
+    },
+    select: { codigo_alumno: true },
+  });
+
+  const usados = new Set(
+    alumnos
+      .map(a => extraerNumeroCodigoAlumno(a.codigo_alumno))
+      .filter(n => Number.isInteger(n) && n > 0)
+  );
+
+  let siguiente = 1;
+  while (usados.has(siguiente)) siguiente += 1;
+  return `H${String(siguiente).padStart(3, '0')}`;
 };
 
 const listar = async (req, res) => {
@@ -37,6 +62,8 @@ const listar = async (req, res) => {
       dni: a.dni,
       nombre_completo: a.nombre_completo,
       foto_url: a.foto_url,
+      monto_matricula: a.monto_matricula !== null && a.monto_matricula !== undefined ? Number(a.monto_matricula) : null,
+      monto_materiales: a.monto_materiales !== null && a.monto_materiales !== undefined ? Number(a.monto_materiales) : null,
       monto_pension: a.monto_pension !== null && a.monto_pension !== undefined ? Number(a.monto_pension) : null,
       estado: a.estado,
       id_aula: a.id_aula,
@@ -85,19 +112,34 @@ const obtenerPorId = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al obtener alumno' }); }
 };
 
-const crear = async (req, res) => {
-  const { codigo_alumno, dni, nombre_completo, monto_pension, id_aula, padre_dni, padre_nombre, padre_celular, padre_username, padre_contrasena } = req.body;
+const siguienteCodigo = async (_req, res) => {
+  try {
+    const codigo = await calcularSiguienteCodigoAlumno();
+    res.json({ data: { codigo_alumno: codigo } });
+  } catch (error) {
+    console.error('Error al calcular siguiente codigo:', error);
+    res.status(500).json({ error: 'Error al calcular siguiente codigo de alumno' });
+  }
+};
 
-  if (!codigo_alumno || !nombre_completo || !id_aula) {
-    return res.status(400).json({ error: 'Codigo, nombre y aula son obligatorios' });
+const crear = async (req, res) => {
+  const { codigo_alumno, dni, nombre_completo, monto_matricula, monto_materiales, monto_pension, id_aula, padre_dni, padre_nombre, padre_celular, padre_username, padre_contrasena } = req.body;
+
+  if (!nombre_completo || !id_aula) {
+    return res.status(400).json({ error: 'Nombre y aula son obligatorios' });
   }
 
   try {
-    const montoPensionValue = parseMontoPension(monto_pension);
+    const montoMatriculaValue = parseMonto(monto_matricula);
+    const montoMaterialesValue = parseMonto(monto_materiales);
+    const montoPensionValue = parseMonto(monto_pension);
+    if (Number.isNaN(montoMatriculaValue)) return res.status(400).json({ error: 'Monto de matricula invalido' });
+    if (Number.isNaN(montoMaterialesValue)) return res.status(400).json({ error: 'Monto de materiales invalido' });
     if (Number.isNaN(montoPensionValue)) return res.status(400).json({ error: 'Monto de pension invalido' });
 
+    const codigoFinal = codigo_alumno?.trim() || await calcularSiguienteCodigoAlumno();
     const codigoExiste = await prisma.tbl_alumnos.findFirst({
-      where: { codigo_alumno: { equals: codigo_alumno, mode: 'insensitive' } },
+      where: { codigo_alumno: { equals: codigoFinal, mode: 'insensitive' } },
     });
     if (codigoExiste) return res.status(409).json({ error: 'Codigo de alumno ya existe' });
 
@@ -123,9 +165,11 @@ const crear = async (req, res) => {
       // Crear alumno
       const alumno = await tx.tbl_alumnos.create({
         data: {
-          codigo_alumno,
+          codigo_alumno: codigoFinal,
           dni: dni || null,
           nombre_completo,
+          monto_matricula: montoMatriculaValue ?? null,
+          monto_materiales: montoMaterialesValue ?? null,
           monto_pension: montoPensionValue ?? null,
           foto_url,
           estado: 'ACTIVO',
@@ -176,7 +220,7 @@ const crear = async (req, res) => {
       return alumno;
     });
 
-    await registrarAuditoria({ userId: req.user.id, accion: 'CREAR_ALUMNO', tipoEntidad: 'tbl_alumnos', idEntidad: result.id, resumen: `Alumno ${nombre_completo} (${codigo_alumno}) creado` });
+    await registrarAuditoria({ userId: req.user.id, accion: 'CREAR_ALUMNO', tipoEntidad: 'tbl_alumnos', idEntidad: result.id, resumen: `Alumno ${nombre_completo} (${codigoFinal}) creado` });
     res.status(201).json({ data: { mensaje: 'Alumno creado con carnet', id: result.id } });
   } catch (error) {
     if (error.message === 'PADRE_DATOS_INCOMPLETOS') {
@@ -195,10 +239,14 @@ const crear = async (req, res) => {
 
 const actualizar = async (req, res) => {
   const id = parseInt(req.params.id);
-  const { nombre_completo, dni, monto_pension, id_aula, estado } = req.body;
+  const { nombre_completo, dni, monto_matricula, monto_materiales, monto_pension, id_aula, estado } = req.body;
 
   try {
-    const montoPensionValue = parseMontoPension(monto_pension);
+    const montoMatriculaValue = parseMonto(monto_matricula);
+    const montoMaterialesValue = parseMonto(monto_materiales);
+    const montoPensionValue = parseMonto(monto_pension);
+    if (Number.isNaN(montoMatriculaValue)) return res.status(400).json({ error: 'Monto de matricula invalido' });
+    if (Number.isNaN(montoMaterialesValue)) return res.status(400).json({ error: 'Monto de materiales invalido' });
     if (Number.isNaN(montoPensionValue)) return res.status(400).json({ error: 'Monto de pension invalido' });
 
     // Validar duplicado de DNI (excluyendo al alumno actual)
@@ -212,6 +260,8 @@ const actualizar = async (req, res) => {
     const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
     if (nombre_completo) data.nombre_completo = nombre_completo;
     if (dni !== undefined) data.dni = dni || null;
+    if (montoMatriculaValue !== undefined) data.monto_matricula = montoMatriculaValue;
+    if (montoMaterialesValue !== undefined) data.monto_materiales = montoMaterialesValue;
     if (montoPensionValue !== undefined) data.monto_pension = montoPensionValue;
     if (id_aula) data.id_aula = parseInt(id_aula);
     if (estado) data.estado = estado;
@@ -371,4 +421,4 @@ const reemitirCarnet = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al reemitir carnet' }); }
 };
 
-module.exports = { listar, obtenerPorId, crear, actualizar, eliminar, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };
+module.exports = { listar, obtenerPorId, siguienteCodigo, crear, actualizar, eliminar, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };

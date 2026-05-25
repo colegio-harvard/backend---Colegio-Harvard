@@ -701,6 +701,8 @@ const cuadricula = async (req, res) => {
       nombre_completo: a.nombre_completo,
       codigo_alumno: a.codigo_alumno,
       dni: a.dni || null,
+      monto_matricula: a.monto_matricula !== null && a.monto_matricula !== undefined ? Number(a.monto_matricula) : null,
+      monto_materiales: a.monto_materiales !== null && a.monto_materiales !== undefined ? Number(a.monto_materiales) : null,
       monto_pension: a.monto_pension !== null && a.monto_pension !== undefined ? Number(a.monto_pension) : null,
       aula: a.tbl_aulas ? {
         id: a.tbl_aulas.id,

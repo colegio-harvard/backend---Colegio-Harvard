@@ -240,6 +240,8 @@ model tbl_alumnos {
   dni                    String?                  @unique @db.VarChar(20)
   nombre_completo        String                   @db.VarChar(200)
   foto_url               String?
+  monto_matricula        Decimal?                 @db.Decimal(10, 2)
+  monto_materiales       Decimal?                 @db.Decimal(10, 2)
   monto_pension          Decimal?                 @db.Decimal(10, 2)
   estado                 String                   @default("ACTIVO") @db.VarChar(20)
   id_aula                Int
