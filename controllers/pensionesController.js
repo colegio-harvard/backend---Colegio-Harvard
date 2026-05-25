@@ -239,9 +239,9 @@ const analizarExcelPensiones = async (buffer) => {
     const codigo = obtenerValorPorEncabezado(row, headerMap, ['Cod. Alumno', 'Cód. Alumno', 'Codigo Alumno', 'Código Alumno']);
     const dni = obtenerValorPorEncabezado(row, headerMap, ['DNI Alumno', 'DNI']);
     const nombre = obtenerValorPorEncabezado(row, headerMap, ['Alumno', 'Nombre', 'Nombre Completo']);
-    if (!nombre) continue;
+    if (!codigo && !dni && !nombre) continue;
+    if (codigo && !dni && !nombre) continue;
 
-    resumen.filas_excel += 1;
     let matchBy = null;
     let alumno = null;
     if (codigo && porCodigo.has(normalizarTexto(codigo))) {
@@ -257,6 +257,9 @@ const analizarExcelPensiones = async (buffer) => {
         matchBy = 'nombre';
       }
     }
+
+    if (!alumno && !nombre) continue;
+    resumen.filas_excel += 1;
 
     if (!alumno) {
       const aulaInfo = resolverAulaImportacion(row, headerMap, aulas);
