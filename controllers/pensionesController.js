@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { todayLima } = require('../utils/dateUtils');
 const crypto = require('crypto');
+const XLSX = require('xlsx');
 
 const formatFechaIso = (fecha) => {
   if (!fecha) return null;
@@ -21,6 +22,183 @@ const normalizarMesesPlantilla = (mesesRaw) => {
 const nombreConcepto = (plantilla, claveMes) => {
   const mes = normalizarMesesPlantilla(plantilla?.meses_json).find(m => m.clave === claveMes);
   return mes?.nombre || claveMes;
+};
+
+const normalizarTexto = (value) => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .toUpperCase();
+
+const parseMontoExcel = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? Number(value) : null;
+  const limpio = String(value).replace(/[^\d.,-]/g, '').replace(',', '.');
+  if (!limpio) return null;
+  const n = Number(limpio);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
+const obtenerValorPorEncabezado = (row, headerMap, nombres) => {
+  for (const nombre of nombres) {
+    const key = headerMap[normalizarTexto(nombre)];
+    if (key && row[key] !== undefined) return row[key];
+  }
+  return null;
+};
+
+const crearMapaConceptosImportacion = (plantilla) => {
+  const meses = normalizarMesesPlantilla(plantilla?.meses_json);
+  const map = {};
+  const alias = {
+    MATRICULA: ['MATRICULA', 'MATRÍCULA'],
+    MATERIALES: ['MATERIALES', 'MATERIAL'],
+    MAR: ['MARZO'],
+    ABR: ['ABRIL'],
+    MAY: ['MAYO'],
+    JUN: ['JUNIO'],
+    JUL: ['JULIO'],
+    AGO: ['AGOSTO'],
+    SET: ['SETIEMBRE', 'SEPTIEMBRE'],
+    SEP: ['SETIEMBRE', 'SEPTIEMBRE'],
+    OCT: ['OCTUBRE'],
+    NOV: ['NOVIEMBRE'],
+    DIC: ['DICIEMBRE'],
+  };
+
+  for (const mes of meses) {
+    const claves = [mes.clave, mes.nombre, ...(alias[mes.clave] || [])];
+    for (const clave of claves) {
+      map[normalizarTexto(clave)] = mes;
+    }
+  }
+  return map;
+};
+
+const leerFilasPagosExcel = (buffer) => {
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  const sheetName = wb.SheetNames.find(n => normalizarTexto(n) === 'PAGOS') || wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  if (!ws) throw new Error('No se encontro la hoja Pagos');
+
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
+  return { sheetName, rows };
+};
+
+const analizarExcelPensiones = async (buffer) => {
+  const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
+  if (!anioActivo) throw new Error('No hay ano escolar activo');
+
+  const plantilla = await prisma.tbl_plantilla_pension.findFirst({
+    where: { id_anio_escolar: anioActivo.id },
+    include: { tbl_anios_escolares: { select: { anio: true } } },
+  });
+  if (!plantilla) throw new Error('No hay plantilla de pension configurada');
+
+  const { sheetName, rows } = leerFilasPagosExcel(buffer);
+  const conceptos = crearMapaConceptosImportacion(plantilla);
+  const alumnos = await prisma.tbl_alumnos.findMany({
+    where: { estado: { not: 'DELETED' } },
+    select: {
+      id: true,
+      codigo_alumno: true,
+      dni: true,
+      nombre_completo: true,
+      monto_matricula: true,
+      monto_materiales: true,
+      monto_pension: true,
+      tbl_estado_pension: { include: { tbl_pagos_pension: { select: { id: true } } } },
+    },
+  });
+
+  const porCodigo = new Map();
+  const porDni = new Map();
+  for (const alumno of alumnos) {
+    if (alumno.codigo_alumno) porCodigo.set(normalizarTexto(alumno.codigo_alumno), alumno);
+    if (alumno.dni) porDni.set(normalizarTexto(alumno.dni), alumno);
+  }
+
+  const coincidencias = [];
+  const noEncontrados = [];
+  const resumen = {
+    hoja: sheetName,
+    filas_excel: 0,
+    alumnos_encontrados: 0,
+    alumnos_no_encontrados: 0,
+    cambios_montos: 0,
+    pagos_nuevos: 0,
+    pagos_omitidos_existentes: 0,
+  };
+
+  for (const row of rows) {
+    const headerMap = {};
+    for (const key of Object.keys(row)) headerMap[normalizarTexto(key)] = key;
+
+    const codigo = obtenerValorPorEncabezado(row, headerMap, ['Cod. Alumno', 'Cód. Alumno', 'Codigo Alumno', 'Código Alumno']);
+    const dni = obtenerValorPorEncabezado(row, headerMap, ['DNI Alumno', 'DNI']);
+    const nombre = obtenerValorPorEncabezado(row, headerMap, ['Alumno', 'Nombre', 'Nombre Completo']);
+    if (!codigo && !dni && !nombre) continue;
+
+    resumen.filas_excel += 1;
+    const alumno = (codigo ? porCodigo.get(normalizarTexto(codigo)) : null)
+      || (dni ? porDni.get(normalizarTexto(dni)) : null);
+
+    if (!alumno) {
+      noEncontrados.push({ codigo_alumno: codigo || '', dni: dni || '', nombre_completo: nombre || '' });
+      continue;
+    }
+
+    const montoMatricula = parseMontoExcel(obtenerValorPorEncabezado(row, headerMap, ['Matricula', 'Matrícula']));
+    const montoMateriales = parseMontoExcel(obtenerValorPorEncabezado(row, headerMap, ['Materiales']));
+    const montoPension = parseMontoExcel(obtenerValorPorEncabezado(row, headerMap, ['Proyectada', 'Pension', 'Pensión']));
+
+    const cambiosMontos = [];
+    [
+      ['monto_matricula', 'Matrícula', montoMatricula],
+      ['monto_materiales', 'Materiales', montoMateriales],
+      ['monto_pension', 'Pensión', montoPension],
+    ].forEach(([campo, etiqueta, valorExcel]) => {
+      if (valorExcel === null) return;
+      const actual = alumno[campo] !== null && alumno[campo] !== undefined ? Number(alumno[campo]) : null;
+      if (actual !== valorExcel) cambiosMontos.push({ campo, etiqueta, actual, nuevo: valorExcel });
+    });
+
+    const estadosPorClave = new Map((alumno.tbl_estado_pension || []).map(e => [e.clave_mes, e]));
+    const pagosNuevos = [];
+    const pagosOmitidos = [];
+    for (const [headerNormalizado, headerOriginal] of Object.entries(headerMap)) {
+      const concepto = conceptos[headerNormalizado];
+      if (!concepto) continue;
+      const monto = parseMontoExcel(row[headerOriginal]);
+      if (monto === null || monto <= 0) continue;
+      const existente = estadosPorClave.get(concepto.clave);
+      const tienePago = existente && ((existente.tbl_pagos_pension || []).length > 0 || Number(existente.monto_pagado || 0) > 0 || existente.estado !== 'PENDIENTE');
+      const item = { clave_mes: concepto.clave, concepto: concepto.nombre, monto };
+      if (tienePago) pagosOmitidos.push(item);
+      else pagosNuevos.push(item);
+    }
+
+    resumen.alumnos_encontrados += 1;
+    resumen.cambios_montos += cambiosMontos.length;
+    resumen.pagos_nuevos += pagosNuevos.length;
+    resumen.pagos_omitidos_existentes += pagosOmitidos.length;
+    coincidencias.push({
+      alumno: {
+        id: alumno.id,
+        codigo_alumno: alumno.codigo_alumno,
+        dni: alumno.dni,
+        nombre_completo: alumno.nombre_completo,
+      },
+      excel: { codigo_alumno: codigo || '', dni: dni || '', nombre_completo: nombre || '' },
+      cambios_montos: cambiosMontos,
+      pagos_nuevos: pagosNuevos,
+      pagos_omitidos: pagosOmitidos,
+    });
+  }
+
+  resumen.alumnos_no_encontrados = noEncontrados.length;
+  return { resumen, coincidencias, noEncontrados };
 };
 
 const generarCodigoTicket = async () => {
@@ -809,4 +987,125 @@ const guardarPlantilla = async (req, res) => {
   }
 };
 
-module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, listarTickets, obtenerDetalleMes, cuadricula, guardarPlantilla };
+const previewImportacionExcel = async (req, res) => {
+  try {
+    if (!req.file?.buffer) return res.status(400).json({ error: 'Debe subir un archivo Excel' });
+    const data = await analizarExcelPensiones(req.file.buffer);
+    res.json({ data });
+  } catch (error) {
+    console.error('Error al analizar Excel de pensiones:', error);
+    res.status(500).json({ error: error.message || 'Error al analizar Excel de pensiones' });
+  }
+};
+
+const aplicarImportacionExcel = async (req, res) => {
+  try {
+    if (!req.file?.buffer) return res.status(400).json({ error: 'Debe subir un archivo Excel' });
+
+    const analisis = await analizarExcelPensiones(req.file.buffer);
+    const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
+    if (!anioActivo) return res.status(400).json({ error: 'No hay ano escolar activo' });
+
+    const plantilla = await prisma.tbl_plantilla_pension.findFirst({
+      where: { id_anio_escolar: anioActivo.id },
+      include: { tbl_anios_escolares: { select: { anio: true } } },
+    });
+    if (!plantilla) return res.status(404).json({ error: 'No hay plantilla de pension configurada' });
+
+    const usuario = await prisma.tbl_usuarios.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, nombres: true, tbl_roles: { select: { codigo: true, nombre: true } } },
+    });
+
+    const resultado = {
+      alumnos_actualizados: 0,
+      campos_montos_actualizados: 0,
+      pagos_creados: 0,
+      pagos_omitidos_existentes: analisis.resumen.pagos_omitidos_existentes,
+      alumnos_no_encontrados: analisis.noEncontrados.length,
+    };
+
+    for (const item of analisis.coincidencias) {
+      if (item.cambios_montos.length > 0) {
+        const data = {};
+        for (const cambio of item.cambios_montos) data[cambio.campo] = cambio.nuevo;
+        data.user_id_modification = req.user.id;
+        data.date_time_modification = new Date();
+        await prisma.tbl_alumnos.update({ where: { id: item.alumno.id }, data });
+        resultado.alumnos_actualizados += 1;
+        resultado.campos_montos_actualizados += item.cambios_montos.length;
+      }
+
+      for (const pagoExcel of item.pagos_nuevos) {
+        const alumno = await prisma.tbl_alumnos.findUnique({
+          where: { id: item.alumno.id },
+          select: {
+            ...selectAlumnoTicket,
+            monto_matricula: true,
+            monto_materiales: true,
+            monto_pension: true,
+          },
+        });
+        if (!alumno) continue;
+
+        const totalBase = pagoExcel.clave_mes === 'MATRICULA'
+          ? alumno.monto_matricula
+          : pagoExcel.clave_mes === 'MATERIALES'
+            ? alumno.monto_materiales
+            : alumno.monto_pension;
+        const montoTotal = totalBase !== null && totalBase !== undefined ? Number(totalBase) : pagoExcel.monto;
+        const estado = pagoExcel.monto >= montoTotal ? 'PAGADO' : 'PAGO_PARCIAL';
+
+        const ep = await prisma.tbl_estado_pension.upsert({
+          where: { id_alumno_clave_mes: { id_alumno: alumno.id, clave_mes: pagoExcel.clave_mes } },
+          create: {
+            id_plantilla: plantilla.id,
+            id_alumno: alumno.id,
+            clave_mes: pagoExcel.clave_mes,
+            estado,
+            monto_total: montoTotal,
+            monto_pagado: pagoExcel.monto,
+            actualizado_por: req.user.id,
+            user_id_registration: req.user.id,
+          },
+          update: {
+            estado,
+            monto_total: montoTotal,
+            monto_pagado: pagoExcel.monto,
+            actualizado_por: req.user.id,
+            user_id_modification: req.user.id,
+            date_time_modification: new Date(),
+          },
+        });
+
+        await crearPagoConTicket({
+          estadoPension: ep,
+          monto: pagoExcel.monto,
+          fechaPago: todayLima().date,
+          observacion: 'Importado desde Excel',
+          alumno,
+          plantilla,
+          usuario,
+          montoTotal,
+          montoPagadoAcumulado: pagoExcel.monto,
+        });
+        resultado.pagos_creados += 1;
+      }
+    }
+
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: 'IMPORTAR_PENSIONES_EXCEL',
+      tipoEntidad: 'tbl_estado_pension',
+      resumen: `Importacion Excel: ${resultado.campos_montos_actualizados} montos y ${resultado.pagos_creados} pagos creados`,
+      meta: resultado,
+    });
+
+    res.json({ data: { mensaje: 'Importacion aplicada', resultado } });
+  } catch (error) {
+    console.error('Error al aplicar Excel de pensiones:', error);
+    res.status(500).json({ error: error.message || 'Error al aplicar Excel de pensiones' });
+  }
+};
+
+module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, listarTickets, obtenerDetalleMes, cuadricula, guardarPlantilla, previewImportacionExcel, aplicarImportacionExcel };
