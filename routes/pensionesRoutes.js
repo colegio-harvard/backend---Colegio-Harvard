@@ -5,6 +5,7 @@ const verificarRol = require('../middleware/rbacMiddleware');
 const ctrl = require('../controllers/pensionesController');
 
 router.get('/plantilla', verificarToken, ctrl.obtenerPlantilla);
+router.get('/tickets', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.listarTickets);
 router.get('/ticket/:codigo', ctrl.obtenerTicket);
 router.get('/estado/:id_alumno', verificarToken, ctrl.obtenerEstado);
 router.post('/registrar-pago', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.registrarPago);

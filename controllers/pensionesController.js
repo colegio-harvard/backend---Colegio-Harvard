@@ -565,6 +565,114 @@ const obtenerTicket = async (req, res) => {
   }
 };
 
+// Listar tickets emitidos para impresion por lotes
+const listarTickets = async (req, res) => {
+  const { fecha_desde, fecha_hasta, buscar, id_nivel, id_grado, id_aula } = req.query;
+
+  try {
+    const where = {};
+    if (fecha_desde || fecha_hasta) {
+      where.fecha_pago = {};
+      if (fecha_desde) where.fecha_pago.gte = new Date(`${fecha_desde}T00:00:00Z`);
+      if (fecha_hasta) where.fecha_pago.lte = new Date(`${fecha_hasta}T00:00:00Z`);
+    }
+
+    const alumnoWhere = {};
+    if (id_aula) {
+      alumnoWhere.id_aula = parseInt(id_aula);
+    } else if (id_grado) {
+      alumnoWhere.tbl_aulas = { id_grado: parseInt(id_grado) };
+    } else if (id_nivel) {
+      alumnoWhere.tbl_aulas = { tbl_grados: { id_nivel: parseInt(id_nivel) } };
+    }
+
+    const term = String(buscar || '').trim();
+    if (term) {
+      where.OR = [
+        { codigo_ticket: { contains: term, mode: 'insensitive' } },
+        { observacion: { contains: term, mode: 'insensitive' } },
+        { tbl_estado_pension: { tbl_alumnos: { nombre_completo: { contains: term, mode: 'insensitive' } } } },
+        { tbl_estado_pension: { tbl_alumnos: { codigo_alumno: { contains: term, mode: 'insensitive' } } } },
+        { tbl_estado_pension: { tbl_alumnos: { dni: { contains: term, mode: 'insensitive' } } } },
+      ];
+    }
+
+    if (Object.keys(alumnoWhere).length > 0) {
+      where.tbl_estado_pension = { tbl_alumnos: alumnoWhere };
+    }
+
+    const pagos = await prisma.tbl_pagos_pension.findMany({
+      where,
+      orderBy: [{ fecha_pago: 'desc' }, { id: 'desc' }],
+      take: 300,
+      include: {
+        tbl_usuarios: { select: { id: true, nombres: true, tbl_roles: { select: { codigo: true, nombre: true } } } },
+        tbl_estado_pension: {
+          include: {
+            tbl_alumnos: { select: selectAlumnoTicket },
+            tbl_plantilla_pension: { include: { tbl_anios_escolares: { select: { anio: true } } } },
+          },
+        },
+      },
+    });
+
+    const data = [];
+    for (const pago of pagos) {
+      const estadoPension = pago.tbl_estado_pension;
+      let ticket = pago.ticket_json;
+
+      if (!ticket || !pago.codigo_ticket) {
+        const pagosEstado = await prisma.tbl_pagos_pension.findMany({
+          where: { id_estado_pension: pago.id_estado_pension },
+          orderBy: [{ fecha_pago: 'asc' }, { id: 'asc' }],
+          select: { id: true, monto: true },
+        });
+        let acumulado = 0;
+        for (const p of pagosEstado) {
+          acumulado += Number(p.monto || 0);
+          if (p.id === pago.id) break;
+        }
+
+        const pagoConTicket = await asegurarTicketPagoExistente({
+          pago,
+          estadoPension,
+          alumno: estadoPension.tbl_alumnos,
+          plantilla: estadoPension.tbl_plantilla_pension,
+          usuario: pago.tbl_usuarios,
+          montoPagadoAcumulado: acumulado,
+        });
+        ticket = pagoConTicket.ticket_json;
+      }
+
+      const alumno = estadoPension.tbl_alumnos;
+      const aula = alumno?.tbl_aulas;
+      data.push({
+        id_pago: pago.id,
+        codigo: ticket?.codigo || pago.codigo_ticket,
+        fecha_pago: formatFechaIso(pago.fecha_pago),
+        monto: Number(pago.monto),
+        observacion: pago.observacion || null,
+        alumno: ticket?.alumno || {
+          id: alumno?.id || null,
+          nombre_completo: alumno?.nombre_completo || '',
+          codigo_alumno: alumno?.codigo_alumno || '',
+          dni: alumno?.dni || null,
+          aula: aula ? `${aula.tbl_grados?.nombre || ''} ${aula.seccion || ''}`.trim() : '',
+          nivel: aula?.tbl_grados?.tbl_niveles?.nombre || null,
+        },
+        concepto: ticket?.pension?.concepto || nombreConcepto(estadoPension.tbl_plantilla_pension, estadoPension.clave_mes),
+        estado: ticket?.pension?.estado || estadoPension.estado,
+        ticket,
+      });
+    }
+
+    res.json({ data });
+  } catch (error) {
+    console.error('Error al listar tickets:', error);
+    res.status(500).json({ error: 'Error al listar tickets de pension' });
+  }
+};
+
 // Vista cuadricula completa (admin)
 const cuadricula = async (req, res) => {
   const { id_aula, id_grado, id_nivel } = req.query;
@@ -699,4 +807,4 @@ const guardarPlantilla = async (req, res) => {
   }
 };
 
-module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, obtenerDetalleMes, cuadricula, guardarPlantilla };
+module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, listarTickets, obtenerDetalleMes, cuadricula, guardarPlantilla };
