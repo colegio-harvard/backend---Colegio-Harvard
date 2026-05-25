@@ -239,8 +239,7 @@ const analizarExcelPensiones = async (buffer) => {
     const codigo = obtenerValorPorEncabezado(row, headerMap, ['Cod. Alumno', 'Cód. Alumno', 'Codigo Alumno', 'Código Alumno']);
     const dni = obtenerValorPorEncabezado(row, headerMap, ['DNI Alumno', 'DNI']);
     const nombre = obtenerValorPorEncabezado(row, headerMap, ['Alumno', 'Nombre', 'Nombre Completo']);
-    if (!codigo && !dni && !nombre) continue;
-    if (codigo && !dni && !nombre) continue;
+    if (!nombre) continue;
 
     resumen.filas_excel += 1;
     let matchBy = null;
