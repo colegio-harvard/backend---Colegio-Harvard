@@ -4,6 +4,11 @@ const { todayLima } = require('../utils/dateUtils');
 const crypto = require('crypto');
 const XLSX = require('xlsx');
 
+const generarQrToken = () => {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return crypto.randomBytes(16).toString('hex');
+};
+
 const formatFechaIso = (fecha) => {
   if (!fecha) return null;
   return new Date(fecha).toISOString().split('T')[0];
@@ -39,6 +44,24 @@ const parseMontoExcel = (value) => {
   const n = Number(limpio);
   return Number.isFinite(n) && n >= 0 ? n : null;
 };
+
+const normalizarSeccion = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return 'A';
+  return raw.replace(/^SECCI[OÓ]N\s+/i, '').trim().toUpperCase();
+};
+
+const normalizarGradoImportacion = (value) => normalizarTexto(value)
+  .replace(/\bGRADO\b/g, '')
+  .replace(/\bANOS\b/g, 'AÑOS')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const aulaKey = (nivel, grado, seccion) => [
+  normalizarTexto(nivel),
+  normalizarGradoImportacion(grado),
+  normalizarSeccion(seccion),
+].join('|');
 
 const obtenerValorPorEncabezado = (row, headerMap, nombres) => {
   for (const nombre of nombres) {
@@ -86,6 +109,31 @@ const leerFilasPagosExcel = (buffer) => {
   return { sheetName, rows };
 };
 
+const resolverAulaImportacion = (row, headerMap, aulas) => {
+  const nivel = obtenerValorPorEncabezado(row, headerMap, ['Nivel', 'Nivel Escolar']);
+  const grado = obtenerValorPorEncabezado(row, headerMap, ['Grado']);
+  const seccion = obtenerValorPorEncabezado(row, headerMap, ['Seccion', 'Sección']) || 'A';
+  const key = aulaKey(nivel, grado, seccion);
+  const exacta = aulas.porKey.get(key);
+  if (exacta) return { aula: exacta, nivel, grado, seccion: normalizarSeccion(seccion), motivo: null };
+
+  const baseKey = [normalizarTexto(nivel), normalizarGradoImportacion(grado)].join('|');
+  const candidatas = aulas.porNivelGrado.get(baseKey) || [];
+  if (candidatas.length === 1) {
+    return { aula: candidatas[0], nivel, grado, seccion: candidatas[0].seccion, motivo: null };
+  }
+  const aulaA = candidatas.find(a => normalizarSeccion(a.seccion) === 'A');
+  if (aulaA) return { aula: aulaA, nivel, grado, seccion: aulaA.seccion, motivo: null };
+
+  return {
+    aula: null,
+    nivel,
+    grado,
+    seccion: normalizarSeccion(seccion),
+    motivo: 'No se encontro un aula compatible',
+  };
+};
+
 const analizarExcelPensiones = async (buffer) => {
   const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
   if (!anioActivo) throw new Error('No hay ano escolar activo');
@@ -111,6 +159,21 @@ const analizarExcelPensiones = async (buffer) => {
       tbl_estado_pension: { include: { tbl_pagos_pension: { select: { id: true } } } },
     },
   });
+  const aulasDb = await prisma.tbl_aulas.findMany({
+    where: { id_anio_escolar: anioActivo.id },
+    include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } },
+  });
+  const aulas = { porKey: new Map(), porNivelGrado: new Map() };
+  for (const aula of aulasDb) {
+    const nivel = aula.tbl_grados?.tbl_niveles?.nombre || '';
+    const grado = aula.tbl_grados?.nombre || '';
+    const key = aulaKey(nivel, grado, aula.seccion);
+    aulas.porKey.set(key, aula);
+    const baseKey = [normalizarTexto(nivel), normalizarGradoImportacion(grado)].join('|');
+    const lista = aulas.porNivelGrado.get(baseKey) || [];
+    lista.push(aula);
+    aulas.porNivelGrado.set(baseKey, lista);
+  }
 
   const porCodigo = new Map();
   const porDni = new Map();
@@ -128,6 +191,8 @@ const analizarExcelPensiones = async (buffer) => {
 
   const coincidencias = [];
   const noEncontrados = [];
+  const alumnosNuevos = [];
+  const alumnosNoCreables = [];
   const resumen = {
     hoja: sheetName,
     filas_excel: 0,
@@ -136,6 +201,8 @@ const analizarExcelPensiones = async (buffer) => {
     cambios_montos: 0,
     pagos_nuevos: 0,
     pagos_omitidos_existentes: 0,
+    alumnos_nuevos_creables: 0,
+    alumnos_nuevos_sin_aula: 0,
   };
 
   for (const row of rows) {
@@ -165,7 +232,27 @@ const analizarExcelPensiones = async (buffer) => {
     }
 
     if (!alumno) {
+      const aulaInfo = resolverAulaImportacion(row, headerMap, aulas);
+      const montoMatricula = parseMontoExcel(obtenerValorPorEncabezado(row, headerMap, ['Matricula', 'Matrícula']));
+      const montoMateriales = parseMontoExcel(obtenerValorPorEncabezado(row, headerMap, ['Materiales']));
+      const montoPension = parseMontoExcel(obtenerValorPorEncabezado(row, headerMap, ['Proyectada', 'Pension', 'Pensión']));
+      const nuevo = {
+        codigo_alumno: codigo || '',
+        dni: dni || '',
+        nombre_completo: nombre || '',
+        nivel: aulaInfo.nivel || '',
+        grado: aulaInfo.grado || '',
+        seccion: aulaInfo.seccion || '',
+        id_aula: aulaInfo.aula?.id || null,
+        aula: aulaInfo.aula ? `${aulaInfo.aula.tbl_grados?.nombre || ''} ${aulaInfo.aula.seccion || ''}`.trim() : null,
+        monto_matricula: montoMatricula,
+        monto_materiales: montoMateriales,
+        monto_pension: montoPension,
+        motivo: aulaInfo.motivo,
+      };
       noEncontrados.push({ codigo_alumno: codigo || '', dni: dni || '', nombre_completo: nombre || '' });
+      if (nuevo.codigo_alumno && nuevo.nombre_completo && nuevo.id_aula) alumnosNuevos.push(nuevo);
+      else alumnosNoCreables.push({ ...nuevo, motivo: nuevo.motivo || 'Falta codigo, nombre o aula' });
       continue;
     }
 
@@ -219,7 +306,9 @@ const analizarExcelPensiones = async (buffer) => {
   }
 
   resumen.alumnos_no_encontrados = noEncontrados.length;
-  return { resumen, coincidencias, noEncontrados };
+  resumen.alumnos_nuevos_creables = alumnosNuevos.length;
+  resumen.alumnos_nuevos_sin_aula = alumnosNoCreables.length;
+  return { resumen, coincidencias, noEncontrados, alumnosNuevos, alumnosNoCreables };
 };
 
 const generarCodigoTicket = async () => {
@@ -1039,12 +1128,49 @@ const aplicarImportacionExcel = async (req, res) => {
     });
 
     const resultado = {
+      alumnos_creados: 0,
       alumnos_actualizados: 0,
       campos_montos_actualizados: 0,
       pagos_creados: 0,
       pagos_omitidos_existentes: analisis.resumen.pagos_omitidos_existentes,
-      alumnos_no_encontrados: analisis.noEncontrados.length,
+      alumnos_no_encontrados: (analisis.alumnosNoCreables || []).length,
     };
+
+    for (const nuevo of analisis.alumnosNuevos || []) {
+      const codigoExiste = await prisma.tbl_alumnos.findFirst({
+        where: { codigo_alumno: { equals: nuevo.codigo_alumno, mode: 'insensitive' } },
+      });
+      const dniExiste = nuevo.dni ? await prisma.tbl_alumnos.findFirst({
+        where: { dni: { equals: String(nuevo.dni), mode: 'insensitive' } },
+      }) : null;
+      if (codigoExiste || dniExiste || !nuevo.id_aula || !nuevo.nombre_completo) continue;
+
+      await prisma.$transaction(async (tx) => {
+        const alumnoCreado = await tx.tbl_alumnos.create({
+          data: {
+            codigo_alumno: String(nuevo.codigo_alumno),
+            dni: nuevo.dni ? String(nuevo.dni) : null,
+            nombre_completo: String(nuevo.nombre_completo),
+            monto_matricula: nuevo.monto_matricula,
+            monto_materiales: nuevo.monto_materiales,
+            monto_pension: nuevo.monto_pension,
+            id_aula: nuevo.id_aula,
+            estado: 'ACTIVO',
+            user_id_registration: req.user.id,
+          },
+        });
+        await tx.tbl_carnets.create({
+          data: {
+            id_alumno: alumnoCreado.id,
+            qr_token: generarQrToken(),
+            version_carnet: 1,
+            emitido_por: req.user.id,
+            user_id_registration: req.user.id,
+          },
+        });
+      });
+      resultado.alumnos_creados += 1;
+    }
 
     for (const item of analisis.coincidencias) {
       if (item.cambios_montos.length > 0) {

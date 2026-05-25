@@ -93,6 +93,8 @@ const ImportarPagosExcel = () => {
   const resumen = preview?.resumen;
   const coincidencias = preview?.coincidencias || [];
   const noEncontrados = preview?.noEncontrados || [];
+  const alumnosNuevos = preview?.alumnosNuevos || [];
+  const alumnosNoCreables = preview?.alumnosNoCreables || [];
 
   return (
     <div className="space-y-5">
@@ -129,7 +131,8 @@ const ImportarPagosExcel = () => {
         <Card>
           <div className="p-5">
             <h2 className="font-display text-xl text-primary-800 mb-4">Resultado aplicado</h2>
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+              <Stat label="Alumnos creados" value={resultado.alumnos_creados || 0} />
               <Stat label="Alumnos actualizados" value={resultado.alumnos_actualizados} />
               <Stat label="Campos de montos" value={resultado.campos_montos_actualizados} />
               <Stat label="Pagos creados" value={resultado.pagos_creados} />
@@ -147,10 +150,12 @@ const ImportarPagosExcel = () => {
               <HiExclamationCircle className="w-5 h-5 text-gold-600" />
               <h2 className="font-display text-xl text-primary-800">Vista previa</h2>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-8 gap-3">
               <Stat label="Filas Excel" value={resumen.filas_excel} />
               <Stat label="Encontrados" value={resumen.alumnos_encontrados} />
               <Stat label="No encontrados" value={resumen.alumnos_no_encontrados} />
+              <Stat label="Nuevos a crear" value={resumen.alumnos_nuevos_creables || 0} />
+              <Stat label="Sin aula" value={resumen.alumnos_nuevos_sin_aula || 0} />
               <Stat label="Cambios de montos" value={resumen.cambios_montos} />
               <Stat label="Pagos nuevos" value={resumen.pagos_nuevos} />
               <Stat label="Pagos omitidos" value={resumen.pagos_omitidos_existentes} />
@@ -192,6 +197,28 @@ const ImportarPagosExcel = () => {
                 <div className="text-sm text-primary-800/70 bg-red-50 border border-red-100 rounded-lg p-3">
                   {noEncontrados.slice(0, 20).map((a, idx) => (
                     <div key={idx}>{a.codigo_alumno || '-'} | {a.dni || '-'} | {a.nombre_completo || '-'}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {alumnosNuevos.length > 0 && (
+              <div>
+                <h3 className="font-semibold text-primary-800 mb-2">Alumnos nuevos que se pueden crear</h3>
+                <div className="text-sm text-primary-800/70 bg-emerald-50 border border-emerald-100 rounded-lg p-3">
+                  {alumnosNuevos.slice(0, 20).map((a, idx) => (
+                    <div key={idx}>{a.codigo_alumno || '-'} | {a.nombre_completo || '-'} | {a.aula || '-'} | Matricula {formatMonto(a.monto_matricula)} | Materiales {formatMonto(a.monto_materiales)} | Pension {formatMonto(a.monto_pension)}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {alumnosNoCreables.length > 0 && (
+              <div>
+                <h3 className="font-semibold text-primary-800 mb-2">Alumnos que necesitan revision</h3>
+                <div className="text-sm text-primary-800/70 bg-amber-50 border border-amber-100 rounded-lg p-3">
+                  {alumnosNoCreables.slice(0, 20).map((a, idx) => (
+                    <div key={idx}>{a.codigo_alumno || '-'} | {a.nombre_completo || '-'} | {a.nivel || '-'} {a.grado || '-'} {a.seccion || '-'} | {a.motivo || 'Revisar datos'}</div>
                   ))}
                 </div>
               </div>
