@@ -65,8 +65,13 @@ if ($content -notmatch "Celular del Apoderado") {
   if ($content.Contains($oldBlock)) {
     $content = $content.Replace($oldBlock, $newBlock)
   } else {
-    $pattern = '(?s)<div>\s*<label className=\{labelClass\}>Pensión \(S/\.\)</label>\s*<input\s*type="number"\s*step="0\.01"\s*min="0"\s*value=\{form\.monto_pension\}\s*onChange=\{\(e\) => setForm\(\{ \.\.\.form, monto_pension: e\.target\.value \}\)\}\s*className=\{inputClass\}\s*placeholder="0\.00"\s*/>\s*</div>'
-    $updated = [regex]::Replace($content, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $m.Value + "`r`n" + @'
+    $fotoMarker = @'
+            </div>
+          </div>
+
+          {/* --- Foto del Alumno --- */}
+'@
+    $phoneBlock = @'
               <div>
                 <label className={labelClass}>Celular del Apoderado</label>
                 <input
@@ -76,11 +81,21 @@ if ($content -notmatch "Celular del Apoderado") {
                   className={`${inputClass} bg-cream-50 text-primary-800/80`}
                 />
               </div>
-'@ }, 1)
-    if ($updated -eq $content) {
-      throw "No se encontro el bloque de pension en Alumnos.jsx."
+'@
+    if ($content.Contains($fotoMarker)) {
+      $content = $content.Replace($fotoMarker, $phoneBlock + "`r`n" + $fotoMarker)
+    } else {
+      $pattern = '(?s)<div>\s*<label className=\{labelClass\}>Pensi.n \(S/\.\)</label>.*?</div>\s*</div>\s*</div>\s*\{\s*/\* --- Foto del Alumno --- \*/\s*\}'
+      $updated = [regex]::Replace($content, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m)
+        $text = $m.Value
+        $text = $text -replace '\{\s*/\* --- Foto del Alumno --- \*/\s*\}', ($phoneBlock + "`r`n          {/* --- Foto del Alumno --- */}")
+        return $text
+      }, 1)
+      if ($updated -eq $content) {
+        throw "No se encontro el punto para insertar el celular del apoderado en Alumnos.jsx."
+      }
+      $content = $updated
     }
-    $content = $updated
   }
 }
 
