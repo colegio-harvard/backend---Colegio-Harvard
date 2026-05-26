@@ -19,6 +19,13 @@ function Replace-Required([string]$Text, [string]$Find, [string]$Replace, [strin
   return $Text.Replace($Find, $Replace)
 }
 
+function Invoke-FrontendGit {
+  & git -C $FrontendDir -c "safe.directory=$FrontendDir" @args
+  if ($LASTEXITCODE -ne 0) {
+    throw "Fallo Git en frontend: git $($args -join ' ')"
+  }
+}
+
 $pagePath = Join-Path $FrontendDir "src\pages\Asistencia.jsx"
 if (!(Test-Path $pagePath)) {
   throw "No se encontro Asistencia.jsx en $pagePath"
@@ -47,12 +54,6 @@ if ($text -notmatch "params\.buscar = filtros\.buscar\.trim\(\)") {
 }
 
 if ($text -notmatch "value=\{filtros\.buscar\}") {
-  $button = @'
-          <button onClick={handleFiltrar} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 shadow-sm text-sm font-medium">
-            Filtrar
-          </button>
-'@
-
   $searchBlock = @'
           <div className="min-w-[240px] flex-1">
             <label className="block text-xs font-medium text-gold-600 mb-1">Buscar</label>
@@ -73,7 +74,11 @@ if ($text -notmatch "value=\{filtros\.buscar\}") {
           </button>
 '@
 
-  $text = Replace-Required $text $button $searchBlock "boton Filtrar"
+  $filterButtonPattern = '(?s)\s{10}<button\s+onClick=\{handleFiltrar\}[^>]*>\s*Filtrar\s*</button>'
+  if ($text -notmatch $filterButtonPattern) {
+    throw "No se encontro el bloque esperado: boton Filtrar"
+  }
+  $text = [regex]::Replace($text, $filterButtonPattern, "`r`n$searchBlock", 1)
 }
 
 if ($text -eq $original) {
@@ -82,16 +87,25 @@ if ($text -eq $original) {
   Write-Text $pagePath $text
 }
 
-Push-Location $FrontendDir
-try {
-  git diff -- src/pages/Asistencia.jsx
-  git add src/pages/Asistencia.jsx
-  git commit -m "Add attendance student search"
-  if ($Publish) {
-    git push origin main
+if (Test-Path (Join-Path $FrontendDir ".git")) {
+  Invoke-FrontendGit diff -- src/pages/Asistencia.jsx
+  $status = & git -C $FrontendDir -c "safe.directory=$FrontendDir" status --porcelain -- src/pages/Asistencia.jsx
+  if ($LASTEXITCODE -ne 0) {
+    throw "Fallo Git en frontend: git status"
   }
-} finally {
-  Pop-Location
+
+  if ($status) {
+    Invoke-FrontendGit add src/pages/Asistencia.jsx
+    Invoke-FrontendGit commit -m "Add attendance student search"
+  } else {
+    Write-Host "No habia cambios pendientes para confirmar en frontend."
+  }
+
+  if ($Publish) {
+    Invoke-FrontendGit push origin main
+  }
+} else {
+  Write-Host "Frontend actualizado, pero no se encontro repositorio Git en $FrontendDir."
 }
 
 Write-Host "Listo. Asistencia Global ahora tiene buscador por nombre, DNI o codigo."
