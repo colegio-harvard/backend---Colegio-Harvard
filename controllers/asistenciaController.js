@@ -140,11 +140,23 @@ const registrarEvento = async (req, res) => {
   try {
     let alumno;
     if (metodo === 'QR') {
-      const carnet = await prisma.tbl_carnets.findUnique({ where: { qr_token }, include: { tbl_alumnos: { include: { tbl_aulas: true } } } });
+      const carnet = await prisma.tbl_carnets.findUnique({
+        where: { qr_token },
+        include: {
+          tbl_alumnos: {
+            include: {
+              tbl_aulas: { include: { tbl_grados: true } },
+            },
+          },
+        },
+      });
       if (!carnet) return res.status(404).json({ error: 'Carnet no reconocido. Verifique el QR.' });
       alumno = carnet.tbl_alumnos;
     } else {
-      alumno = await prisma.tbl_alumnos.findUnique({ where: { codigo_alumno }, include: { tbl_aulas: true } });
+      alumno = await prisma.tbl_alumnos.findUnique({
+        where: { codigo_alumno },
+        include: { tbl_aulas: { include: { tbl_grados: true } } },
+      });
       if (!alumno) return res.status(404).json({ error: 'Codigo de alumno incorrecto.' });
     }
 
@@ -266,13 +278,16 @@ const registrarEvento = async (req, res) => {
     });
 
     const pensiones = await obtenerPensionesAlumno(alumno.id, anioActivo.id);
+    const aulaNombre = alumno.tbl_aulas
+      ? `${alumno.tbl_aulas.tbl_grados?.nombre || ''} ${alumno.tbl_aulas.seccion || ''}`.trim()
+      : null;
 
     res.json({
       data: {
         tipo_evento: tipoEvento,
         alumno: alumno.nombre_completo,
         foto: alumno.foto_url,
-        aula: alumno.tbl_aulas.seccion,
+        aula: aulaNombre,
         fecha_hora: toUtcIso(ahora),
         metodo,
         codigo_alumno: alumno.codigo_alumno,
