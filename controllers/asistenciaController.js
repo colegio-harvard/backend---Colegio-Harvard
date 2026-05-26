@@ -84,6 +84,12 @@ const obtenerPensionesAlumno = async (idAlumno, idAnioEscolar) => {
     prisma.tbl_plantilla_pension.findFirst({ where: { id_anio_escolar: idAnioEscolar } }),
     prisma.tbl_estado_pension.findMany({
       where: { id_alumno: idAlumno },
+      include: {
+        tbl_pagos_pension: {
+          select: { monto: true, fecha_pago: true, observacion: true },
+          orderBy: { fecha_pago: 'asc' },
+        },
+      },
       orderBy: { clave_mes: 'asc' },
     }),
     prisma.tbl_alumnos.findUnique({
@@ -106,6 +112,11 @@ const obtenerPensionesAlumno = async (idAlumno, idAnioEscolar) => {
     const estado = estadosMap.get(m.clave);
     const montoTotal = estado?.monto_total ? Number(estado.monto_total) : (alumno?.monto_pension ? Number(alumno.monto_pension) : null);
     const montoPagado = estado ? Number(estado.monto_pagado) : 0;
+    const pagos = (estado?.tbl_pagos_pension || []).map(p => ({
+      monto: Number(p.monto || 0),
+      fecha_pago: p.fecha_pago,
+      observacion: p.observacion || '',
+    }));
     return {
       clave: m.clave,
       nombre: m.nombre,
@@ -114,6 +125,8 @@ const obtenerPensionesAlumno = async (idAlumno, idAnioEscolar) => {
       monto_total: montoTotal,
       monto_pagado: montoPagado,
       saldo: montoTotal !== null ? Math.max(montoTotal - montoPagado, 0) : null,
+      observacion_no_corresponde: estado?.observacion_no_corresponde || '',
+      pagos,
     };
   });
 
