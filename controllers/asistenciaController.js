@@ -647,7 +647,7 @@ const obtenerAulasTutor = async (req, res) => {
 
 // FLW-12: Asistencia global admin (acepta fecha, fecha_inicio/fecha_fin, filtros completos)
 const asistenciaGlobal = async (req, res) => {
-  const { fecha, fecha_inicio, fecha_fin, id_aula, id_nivel, id_grado, estado: estadoFiltro } = req.query;
+  const { fecha, fecha_inicio, fecha_fin, id_aula, id_nivel, id_grado, estado: estadoFiltro, buscar } = req.query;
   try {
     const where = {};
 
@@ -664,7 +664,7 @@ const asistenciaGlobal = async (req, res) => {
       include: {
         tbl_alumnos: {
           select: {
-            id: true, nombre_completo: true, codigo_alumno: true,
+            id: true, nombre_completo: true, codigo_alumno: true, dni: true,
             tbl_aulas: { select: { id: true, seccion: true, tbl_grados: { select: { id: true, nombre: true, tbl_niveles: { select: { id: true, nombre: true } } } } } },
           },
         },
@@ -684,6 +684,15 @@ const asistenciaGlobal = async (req, res) => {
     if (id_grado) {
       resultado = resultado.filter(a => a.tbl_alumnos?.tbl_aulas?.tbl_grados?.id === parseInt(id_grado));
     }
+    if (buscar && String(buscar).trim()) {
+      const q = String(buscar).trim().toLowerCase();
+      resultado = resultado.filter(a => {
+        const alumno = a.tbl_alumnos || {};
+        return [alumno.nombre_completo, alumno.codigo_alumno, alumno.dni]
+          .filter(Boolean)
+          .some(value => String(value).toLowerCase().includes(q));
+      });
+    }
 
     const data = resultado.map(r => ({
       id: r.id,
@@ -693,6 +702,7 @@ const asistenciaGlobal = async (req, res) => {
         id: r.tbl_alumnos.id,
         nombre_completo: r.tbl_alumnos.nombre_completo,
         codigo_alumno: r.tbl_alumnos.codigo_alumno,
+        dni: r.tbl_alumnos.dni,
         aula: r.tbl_alumnos.tbl_aulas ? {
           id: r.tbl_alumnos.tbl_aulas.id,
           seccion: r.tbl_alumnos.tbl_aulas.seccion,
@@ -714,7 +724,7 @@ const asistenciaGlobal = async (req, res) => {
 
 // FLW-12: Export Excel
 const exportarExcel = async (req, res) => {
-  const { fecha, fecha_inicio, fecha_fin, id_aula, id_nivel, estado: estadoFiltro } = req.query;
+  const { fecha, fecha_inicio, fecha_fin, id_aula, id_nivel, id_grado, estado: estadoFiltro, buscar } = req.query;
   try {
     const where = {};
     if (fecha) {
@@ -728,7 +738,7 @@ const exportarExcel = async (req, res) => {
       where,
       include: {
         tbl_alumnos: {
-          select: { nombre_completo: true, codigo_alumno: true,
+          select: { nombre_completo: true, codigo_alumno: true, dni: true,
             tbl_aulas: { select: { seccion: true, tbl_grados: { select: { nombre: true, tbl_niveles: { select: { id: true, nombre: true } } } } } } },
         },
         tbl_evento_checkin: { select: { hora_evento: true, metodo: true } },
@@ -740,10 +750,21 @@ const exportarExcel = async (req, res) => {
     let resultado = asistencias;
     if (id_aula) resultado = resultado.filter(a => a.tbl_alumnos?.tbl_aulas?.id === parseInt(id_aula));
     if (id_nivel) resultado = resultado.filter(a => a.tbl_alumnos?.tbl_aulas?.tbl_grados?.tbl_niveles?.id === parseInt(id_nivel));
+    if (id_grado) resultado = resultado.filter(a => a.tbl_alumnos?.tbl_aulas?.tbl_grados?.id === parseInt(id_grado));
+    if (buscar && String(buscar).trim()) {
+      const q = String(buscar).trim().toLowerCase();
+      resultado = resultado.filter(a => {
+        const alumno = a.tbl_alumnos || {};
+        return [alumno.nombre_completo, alumno.codigo_alumno, alumno.dni]
+          .filter(Boolean)
+          .some(value => String(value).toLowerCase().includes(q));
+      });
+    }
 
     const rows = resultado.map(r => ({
       Fecha: r.fecha ? new Date(r.fecha).toLocaleDateString('es-PE', { timeZone: 'UTC' }) : '',
       Codigo: r.tbl_alumnos?.codigo_alumno || '',
+      DNI: r.tbl_alumnos?.dni || '',
       Alumno: r.tbl_alumnos?.nombre_completo || '',
       Nivel: r.tbl_alumnos?.tbl_aulas?.tbl_grados?.tbl_niveles?.nombre || '',
       Grado: r.tbl_alumnos?.tbl_aulas?.tbl_grados?.nombre || '',
