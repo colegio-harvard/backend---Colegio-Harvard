@@ -31,14 +31,14 @@ if ($text -notmatch "HiSearch") {
   $text = Replace-Required $text `
     "import { HiDownload, HiCalendar, HiViewGrid, HiViewList } from 'react-icons/hi';" `
     "import { HiDownload, HiCalendar, HiViewGrid, HiViewList, HiSearch } from 'react-icons/hi';" `
-    "importar icono de busqueda"
+    "icono Buscar"
 }
 
 if ($text -notmatch "buscar: ''") {
   $text = Replace-Required $text `
     "const [filtros, setFiltros] = useState({ id_nivel: '', id_grado: '', id_aula: '', estado: '' });" `
     "const [filtros, setFiltros] = useState({ id_nivel: '', id_grado: '', id_aula: '', estado: '', buscar: '' });" `
-    "estado filtros con buscar"
+    "estado filtros"
 }
 
 if ($text -notmatch "params\.buscar = filtros\.buscar\.trim\(\)") {
@@ -47,29 +47,13 @@ if ($text -notmatch "params\.buscar = filtros\.buscar\.trim\(\)") {
 }
 
 if ($text -notmatch "value=\{filtros\.buscar\}") {
-  $needle = @'
-          <div>
-            <label className="block text-xs font-medium text-gold-600 mb-1">Estado</label>
-            <select value={filtros.estado} onChange={(e) => setFiltros({...filtros, estado: e.target.value})}
-              className="px-3 py-2 border border-cream-300 rounded-lg outline-none text-sm">
-              <option value="">Todos</option>
-              <option value="PRESENTE">Asistió</option>
-              <option value="TARDE">Tardanza</option>
-              <option value="AUSENTE">Faltó</option>
-            </select>
-          </div>
+  $button = @'
+          <button onClick={handleFiltrar} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 shadow-sm text-sm font-medium">
+            Filtrar
+          </button>
 '@
-  $insert = @'
-          <div>
-            <label className="block text-xs font-medium text-gold-600 mb-1">Estado</label>
-            <select value={filtros.estado} onChange={(e) => setFiltros({...filtros, estado: e.target.value})}
-              className="px-3 py-2 border border-cream-300 rounded-lg outline-none text-sm">
-              <option value="">Todos</option>
-              <option value="PRESENTE">Asistió</option>
-              <option value="TARDE">Tardanza</option>
-              <option value="AUSENTE">Faltó</option>
-            </select>
-          </div>
+
+  $searchBlock = @'
           <div className="min-w-[240px] flex-1">
             <label className="block text-xs font-medium text-gold-600 mb-1">Buscar</label>
             <div className="relative">
@@ -84,11 +68,12 @@ if ($text -notmatch "value=\{filtros\.buscar\}") {
               />
             </div>
           </div>
+          <button onClick={handleFiltrar} className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 shadow-sm text-sm font-medium">
+            Filtrar
+          </button>
 '@
-  if (!$text.Contains($needle)) {
-    throw "No se encontro el bloque del filtro Estado para insertar Buscar."
-  }
-  $text = $text.Replace($needle, $insert)
+
+  $text = Replace-Required $text $button $searchBlock "boton Filtrar"
 }
 
 if ($text -eq $original) {
