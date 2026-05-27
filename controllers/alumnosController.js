@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
 const path = require('path');
+const XLSX = require('xlsx');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { validarContrasena } = require('../utils/validaciones');
 const { uploadFile } = require('../utils/storageService');
@@ -95,6 +96,118 @@ const listar = async (req, res) => {
   } catch (error) {
     console.error('Error al listar alumnos:', error);
     res.status(500).json({ error: 'Error al listar alumnos' });
+  }
+};
+
+const ordenNivel = (nombre) => {
+  const n = String(nombre || '').toLowerCase();
+  if (n.includes('inicial')) return 1;
+  if (n.includes('primaria')) return 2;
+  if (n.includes('secundaria')) return 3;
+  return 99;
+};
+
+const ordenGrado = (nombre) => {
+  const n = String(nombre || '').toLowerCase();
+  if (n.includes('4 a')) return 1;
+  if (n.includes('5 a')) return 2;
+  const map = [
+    ['1', '1ro', 'primer'], ['2', '2do', 'segundo'], ['3', '3ro', 'tercer'],
+    ['4', '4to', 'cuarto'], ['5', '5to', 'quinto'], ['6', '6to', 'sexto'],
+  ];
+  for (let i = 0; i < map.length; i += 1) {
+    if (map[i].some(v => n.includes(v))) return i + 1;
+  }
+  return 99;
+};
+
+const safeSheetName = (base, usados) => {
+  let name = String(base || 'Aula').replace(/[\\/?*[\]:]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || 'Aula';
+  let finalName = name;
+  let i = 2;
+  while (usados.has(finalName)) {
+    const suffix = ` ${i}`;
+    finalName = `${name.slice(0, 31 - suffix.length)}${suffix}`;
+    i += 1;
+  }
+  usados.add(finalName);
+  return finalName;
+};
+
+const exportarAulasExcel = async (req, res) => {
+  try {
+    const aulas = await prisma.tbl_aulas.findMany({
+      include: {
+        tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } },
+        tbl_alumnos: {
+          where: { estado: { not: 'DELETED' } },
+          include: {
+            tbl_padres_alumnos: { include: { tbl_padres: { select: { nombre_completo: true, dni: true, celular: true } } } },
+          },
+          orderBy: { nombre_completo: 'asc' },
+        },
+      },
+    });
+
+    const aulasOrdenadas = aulas.sort((a, b) => {
+      const na = a.tbl_grados?.tbl_niveles?.nombre || '';
+      const nb = b.tbl_grados?.tbl_niveles?.nombre || '';
+      return ordenNivel(na) - ordenNivel(nb)
+        || ordenGrado(a.tbl_grados?.nombre) - ordenGrado(b.tbl_grados?.nombre)
+        || String(a.seccion || '').localeCompare(String(b.seccion || ''), 'es');
+    });
+
+    const wb = XLSX.utils.book_new();
+    const usados = new Set();
+
+    const resumen = aulasOrdenadas.map(aula => ({
+      Nivel: aula.tbl_grados?.tbl_niveles?.nombre || '',
+      Grado: aula.tbl_grados?.nombre || '',
+      Seccion: aula.seccion || '',
+      Aula: `${aula.tbl_grados?.nombre || ''} ${aula.seccion || ''}`.trim(),
+      Alumnos: aula.tbl_alumnos.length,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), 'Resumen');
+    usados.add('Resumen');
+
+    aulasOrdenadas.forEach((aula) => {
+      const rows = aula.tbl_alumnos.map((alumno, index) => {
+        const padre = alumno.tbl_padres_alumnos?.tbl_padres;
+        return {
+          N: index + 1,
+          Codigo: alumno.codigo_alumno || '',
+          DNI: alumno.dni || '',
+          Alumno: alumno.nombre_completo || '',
+          Nivel: aula.tbl_grados?.tbl_niveles?.nombre || '',
+          Grado: aula.tbl_grados?.nombre || '',
+          Seccion: aula.seccion || '',
+          Estado: alumno.estado || '',
+          Matricula: alumno.monto_matricula !== null && alumno.monto_matricula !== undefined ? Number(alumno.monto_matricula) : '',
+          Materiales: alumno.monto_materiales !== null && alumno.monto_materiales !== undefined ? Number(alumno.monto_materiales) : '',
+          Pension: alumno.monto_pension !== null && alumno.monto_pension !== undefined ? Number(alumno.monto_pension) : '',
+          Padre: padre?.nombre_completo || '',
+          DNI_Padre: padre?.dni || '',
+          Celular_Padre: padre?.celular || '',
+        };
+      });
+      const sheetName = safeSheetName(`${aula.tbl_grados?.nombre || 'Aula'} ${aula.seccion || ''}`, usados);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), sheetName);
+    });
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: 'EXPORTAR_AULAS_EXCEL',
+      tipoEntidad: 'tbl_alumnos',
+      resumen: `Exportacion de aulas a Excel (${aulasOrdenadas.length} aulas)`,
+      req,
+    });
+    res.setHeader('Content-Disposition', `attachment; filename=aulas-alumnos-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (error) {
+    console.error('Error al exportar aulas:', error);
+    res.status(500).json({ error: 'Error al exportar aulas' });
   }
 };
 
@@ -422,4 +535,4 @@ const reemitirCarnet = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al reemitir carnet' }); }
 };
 
-module.exports = { listar, obtenerPorId, siguienteCodigo, crear, actualizar, eliminar, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };
+module.exports = { listar, obtenerPorId, siguienteCodigo, exportarAulasExcel, crear, actualizar, eliminar, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };
