@@ -425,7 +425,7 @@ const calendarioPadre = async (req, res) => {
       return res.status(400).json({ error: 'id_alumno invalido' });
     }
     const esPadre = req.user.rol_codigo === 'PADRE';
-    const idsConsulta = esPadre && idsHijosPadre.length > 0 ? idsHijosPadre : [idAlumnoNum];
+    const idsConsulta = [idAlumnoNum];
 
     const idsSql = idsConsulta.map(Number).filter(Number.isInteger).join(',');
     const asistenciasRaw = idsSql
