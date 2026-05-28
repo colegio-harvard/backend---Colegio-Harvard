@@ -16,6 +16,7 @@ router.post('/niveles', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ct
 // Grados
 router.get('/grados', verificarToken, ctrl.listarGrados);
 router.post('/grados', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.crearGrado);
+router.put('/grados/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.actualizarGrado);
 
 // Aulas
 router.get('/aulas', verificarToken, ctrl.listarAulas);

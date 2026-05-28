@@ -81,6 +81,24 @@ const crearGrado = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al crear grado' }); }
 };
 
+const actualizarGrado = async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { id_nivel, nombre, orden } = req.body;
+  try {
+    const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
+    if (id_nivel !== undefined && id_nivel !== '') data.id_nivel = parseInt(id_nivel);
+    if (nombre !== undefined) data.nombre = String(nombre).trim();
+    if (orden !== undefined && orden !== '') data.orden = parseInt(orden);
+
+    const grado = await prisma.tbl_grados.update({ where: { id }, data });
+    await registrarAuditoria({ userId: req.user.id, accion: 'ACTUALIZAR_GRADO', tipoEntidad: 'tbl_grados', idEntidad: id, resumen: `Grado actualizado: ${grado.nombre}` });
+    res.json({ mensaje: 'Grado actualizado', data: grado });
+  } catch (error) {
+    console.error('Error al actualizar grado:', error);
+    res.status(500).json({ error: 'Error al actualizar grado' });
+  }
+};
+
 // --- AULAS ---
 const listarAulas = async (req, res) => {
   const { id_anio_escolar } = req.query;
@@ -357,7 +375,7 @@ const listarMeses = async (req, res) => {
 module.exports = {
   listarAnios, crearAnio, activarAnio,
   listarNiveles, crearNivel,
-  listarGrados, crearGrado,
+  listarGrados, crearGrado, actualizarGrado,
   listarAulas, obtenerAula, crearAula, actualizarAula, asignarTutor,
   listarCalendario, actualizarDiaCalendario,
   listarPuntosEscaneo, crearPuntoEscaneo, asignarPorteria,
