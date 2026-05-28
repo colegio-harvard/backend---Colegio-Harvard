@@ -400,6 +400,9 @@ const selectAlumnoTicket = {
   nombre_completo: true,
   codigo_alumno: true,
   dni: true,
+  monto_matricula: true,
+  monto_materiales: true,
+  monto_pension: true,
   tbl_aulas: {
     select: {
       seccion: true,
@@ -620,11 +623,16 @@ const obtenerDetalleMes = async (req, res) => {
       pagos.push(pagoConTicket);
     }
 
+    const montoActualAlumno = montoBaseConceptoAlumno(estado.tbl_alumnos, clave_mes);
+    const montoTotalDetalle = ['PENDIENTE', 'PAGO_PARCIAL'].includes(estado.estado) && montoActualAlumno !== null && montoActualAlumno !== undefined
+      ? Number(montoActualAlumno)
+      : (estado.monto_total ? Number(estado.monto_total) : null);
+
     res.json({
       data: {
         id: estado.id,
         estado: estado.estado,
-        monto_total: estado.monto_total ? Number(estado.monto_total) : null,
+        monto_total: montoTotalDetalle,
         monto_pagado: Number(estado.monto_pagado),
         observacion_no_corresponde: estado.observacion_no_corresponde || null,
         pagos: pagos.map(p => ({
