@@ -276,7 +276,35 @@ $newHeader = @"
 if ($text.Contains($oldHeader)) {
   $text = $text.Replace($oldHeader, $newHeader)
 } elseif ($text -notmatch "adminTab === 'calendarizacion'") {
-  throw "No se encontro el encabezado de Asistencia Global para insertar Calendarizacion."
+  $pattern = '(?s)  return \(\s*<div>\s*<div className="flex items-center justify-between mb-6">\s*<h1 className="page-title">Asistencia Global</h1>\s*<button onClick=\{handleExportar\}.*?</button>\s*</div>'
+  if ([regex]::IsMatch($text, $pattern)) {
+    $text = [regex]::Replace($text, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{
+      param($m)
+      @"
+  if (adminTab === 'calendarizacion') {
+    return (
+      <div>
+        <div className="flex gap-2 mb-6">
+          <button onClick={() => setAdminTab('global')} className="px-4 py-2 rounded-lg bg-cream-100 text-primary-700">Asistencia Global</button>
+          <button onClick={() => setAdminTab('calendarizacion')} className="px-4 py-2 rounded-lg bg-primary-700 text-white">Calendarizacion</button>
+        </div>
+        <CalendarizacionAdmin />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-6">
+        <button onClick={() => setAdminTab('global')} className="px-4 py-2 rounded-lg bg-primary-700 text-white">Asistencia Global</button>
+        <button onClick={() => setAdminTab('calendarizacion')} className="px-4 py-2 rounded-lg bg-cream-100 text-primary-700">Calendarizacion</button>
+      </div>
+$($m.Value.Substring($m.Value.IndexOf('<div className="flex items-center justify-between mb-6">')))
+"@
+    }, 1)
+  } else {
+    throw "No se encontro el encabezado de Asistencia Global para insertar Calendarizacion."
+  }
 }
 
 if ($text -eq $original) { throw "No se aplicaron cambios en Asistencia.jsx." }
