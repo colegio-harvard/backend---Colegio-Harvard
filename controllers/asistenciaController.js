@@ -456,6 +456,18 @@ const calendarioPadre = async (req, res) => {
     const asistencias = asistenciasRaw.filter(a => estaEnMes(a.fecha, mes, anio));
     const eventos = eventosRaw.filter(e => estaEnMes(e.fecha_evento, mes, anio));
     const alertasMes = alertasRaw.filter(a => estaEnMes(a.fecha, mes, anio) || estaEnMes(a.date_time_registration, mes, anio));
+    const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
+    const calendarioEspecial = anioActivo
+      ? await prisma.tbl_calendario_escolar.findMany({
+        where: {
+          id_anio_escolar: anioActivo.id,
+          fecha: { gte: fechaInicio, lte: fechaFin },
+          es_dia_lectivo: false,
+        },
+        orderBy: { fecha: 'asc' },
+      })
+      : [];
+    const diasEspecialesPorFecha = new Map(calendarioEspecial.map(d => [fechaKey(d.fecha), d]));
     const asistenciasPorFecha = new Map();
     for (const asistencia of asistencias) {
       asistenciasPorFecha.set(fechaKey(asistencia.fecha), asistencia);
@@ -502,8 +514,22 @@ const calendarioPadre = async (req, res) => {
       const asistenciaDia = asistenciasPorFecha.get(fechaDia);
       const eventoDia = eventosPorFecha.get(fechaDia);
       const alertaDia = alertasPorFecha.get(fechaDia);
+      const diaEspecial = diasEspecialesPorFecha.get(fechaDia);
 
-      if (asistenciaDia) {
+      if (diaEspecial) {
+        diasCalendario.push({
+          dia: d,
+          fecha: fechaDia,
+          estado: 'NO_LECTIVO',
+          es_dia_lectivo: false,
+          nota: diaEspecial.nota || 'Dia no lectivo',
+          hora_ingreso: null,
+          metodo_ingreso: null,
+          punto_escaneo: null,
+          hora_salida: null,
+          salida_no_registrada: false,
+        });
+      } else if (asistenciaDia) {
         const checkin = eventosPorId.get(asistenciaDia.id_evento_checkin) || eventoDia?.checkin || null;
         const checkout = eventosPorId.get(asistenciaDia.id_evento_checkout) || eventoDia?.checkout || null;
         diasCalendario.push({
