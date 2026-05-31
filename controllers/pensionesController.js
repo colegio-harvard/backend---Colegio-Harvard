@@ -31,8 +31,8 @@ const nombreConcepto = (plantilla, claveMes) => {
 
 const montoBaseConceptoAlumno = (alumno, claveMes) => {
   const clave = normalizarTexto(claveMes);
-  if (clave === 'MATRICULA') return alumno.monto_matricula;
-  if (clave === 'MATERIALES') return alumno.monto_materiales;
+  if (clave.includes('MATRICULA')) return alumno.monto_matricula;
+  if (clave.includes('MATERIAL')) return alumno.monto_materiales;
   return alumno.monto_pension;
 };
 
@@ -623,7 +623,8 @@ const obtenerDetalleMes = async (req, res) => {
       pagos.push(pagoConTicket);
     }
 
-    const montoActualAlumno = montoBaseConceptoAlumno(estado.tbl_alumnos, clave_mes);
+    const conceptoDetalle = `${clave_mes} ${nombreConcepto(estado.tbl_plantilla_pension, clave_mes)}`;
+    const montoActualAlumno = montoBaseConceptoAlumno(estado.tbl_alumnos, conceptoDetalle);
     const montoTotalDetalle = ['PENDIENTE', 'PAGO_PARCIAL'].includes(estado.estado) && montoActualAlumno !== null && montoActualAlumno !== undefined
       ? Number(montoActualAlumno)
       : (estado.monto_total ? Number(estado.monto_total) : null);
