@@ -53,7 +53,8 @@ const corsOptions = {
 
 // --- Middleware global ---
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));
+app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // --- Registro de rutas ---
