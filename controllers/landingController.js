@@ -11,6 +11,7 @@ const obtenerDatosLanding = async (req, res) => {
         email: true,
         telefono: true,
         telefono_whatsapp: true,
+        portada_imagen_url: true,
       },
     });
     if (!colegio) return res.status(404).json({ error: 'Colegio no configurado' });

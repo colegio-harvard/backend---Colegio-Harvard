@@ -96,6 +96,7 @@ model tbl_colegio {
   direccion              String?               @db.VarChar(300)
   email                  String?               @db.VarChar(100)
   lema                   String?               @db.VarChar(300)
+  portada_imagen_url     String?
   telefono               String?               @db.VarChar(20)
   tbl_anios_escolares    tbl_anios_escolares[]
   tbl_niveles            tbl_niveles[]

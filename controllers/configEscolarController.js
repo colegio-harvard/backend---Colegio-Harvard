@@ -289,12 +289,13 @@ const obtenerColegio = async (req, res) => {
       telefono_whatsapp: colegio.telefono_whatsapp,
       lema: colegio.lema, descripcion: colegio.descripcion,
       direccion: colegio.direccion, email: colegio.email, telefono: colegio.telefono,
+      portada_imagen_url: colegio.portada_imagen_url,
     }});
   } catch (error) { res.status(500).json({ error: 'Error al obtener datos del colegio' }); }
 };
 
 const actualizarColegio = async (req, res) => {
-  const { telefono_whatsapp, lema, descripcion, direccion, email, telefono } = req.body;
+  const { telefono_whatsapp, lema, descripcion, direccion, email, telefono, portada_imagen_url } = req.body;
   try {
     const colegio = await prisma.tbl_colegio.findFirst();
     if (!colegio) return res.status(404).json({ error: 'Colegio no configurado' });
@@ -305,6 +306,7 @@ const actualizarColegio = async (req, res) => {
     if (direccion !== undefined) data.direccion = direccion;
     if (email !== undefined) data.email = email;
     if (telefono !== undefined) data.telefono = telefono;
+    if (portada_imagen_url !== undefined) data.portada_imagen_url = portada_imagen_url || null;
     await prisma.tbl_colegio.update({ where: { id: colegio.id }, data });
     res.json({ mensaje: 'Datos del colegio actualizados' });
   } catch (error) { res.status(500).json({ error: 'Error al actualizar datos del colegio' }); }
