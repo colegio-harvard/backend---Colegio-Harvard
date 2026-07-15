@@ -1116,6 +1116,7 @@ const cuadricula = async (req, res) => {
 };
 
 const exportarReportePagosExcel = async (req, res) => {
+  const { concepto_desde, concepto_hasta } = req.query;
   try {
     const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
     if (!anioActivo) return res.status(400).json({ error: 'No hay ano escolar activo' });
@@ -1124,7 +1125,21 @@ const exportarReportePagosExcel = async (req, res) => {
       where: { id_anio_escolar: anioActivo.id },
     });
     if (!plantilla) return res.status(404).json({ error: 'No hay plantilla de pension configurada' });
-    const meses = normalizarMesesPlantilla(plantilla.meses_json);
+    let meses = normalizarMesesPlantilla(plantilla.meses_json);
+    if (concepto_desde || concepto_hasta) {
+      if (!concepto_desde || !concepto_hasta) {
+        return res.status(400).json({ error: 'Seleccione el concepto inicial y final' });
+      }
+      const indiceDesde = meses.findIndex(m => m.clave === concepto_desde);
+      const indiceHasta = meses.findIndex(m => m.clave === concepto_hasta);
+      if (indiceDesde < 0 || indiceHasta < 0) {
+        return res.status(400).json({ error: 'El rango contiene un concepto no valido' });
+      }
+      if (indiceDesde > indiceHasta) {
+        return res.status(400).json({ error: 'El concepto inicial debe estar antes del concepto final' });
+      }
+      meses = meses.slice(indiceDesde, indiceHasta + 1);
+    }
 
     const alumnos = await prisma.tbl_alumnos.findMany({
       where: { estado: 'ACTIVO' },
@@ -1187,6 +1202,8 @@ const exportarReportePagosExcel = async (req, res) => {
         anio: anioActivo.anio,
         deudas: cantidadDeudas,
         saldo: deudaTotal,
+        concepto_desde: meses[0]?.clave || null,
+        concepto_hasta: meses[meses.length - 1]?.clave || null,
       },
     });
 
