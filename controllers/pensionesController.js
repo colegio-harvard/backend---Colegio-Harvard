@@ -1155,6 +1155,7 @@ const exportarReportePagosExcel = async (req, res) => {
         deudas.push({
           'Código de alumno': alumno.codigo_alumno,
           Alumno: alumno.nombre_completo,
+          Grado: `${alumno.tbl_aulas?.tbl_grados?.nombre || ''} ${alumno.tbl_aulas?.seccion || ''}`.trim(),
           Celular: padre?.celular || '',
           Concepto: mes.nombre,
           Saldo: saldo,
@@ -1166,6 +1167,7 @@ const exportarReportePagosExcel = async (req, res) => {
     const cantidadDeudas = deudas.length;
     deudas.push({
       Alumno: 'TOTAL',
+      Grado: '',
       Celular: '',
       Concepto: '',
       Saldo: deudaTotal,
@@ -1258,6 +1260,7 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
       rows.push({
         'Código de alumno': alumno.codigo_alumno,
         Alumno: alumno.nombre_completo,
+        Grado: `${alumno.tbl_aulas?.tbl_grados?.nombre || ''} ${alumno.tbl_aulas?.seccion || ''}`.trim(),
         Celular: padre?.celular || '',
         Concepto: conceptoSeleccionado.nombre,
         Saldo: saldo,
@@ -1268,6 +1271,7 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
     const saldoTotal = rows.reduce((sum, row) => sum + Number(row.Saldo || 0), 0);
     rows.push({
       Alumno: 'TOTAL',
+      Grado: '',
       Celular: '',
       Concepto: '',
       Saldo: saldoTotal,
