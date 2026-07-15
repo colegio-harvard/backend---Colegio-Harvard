@@ -1287,52 +1287,20 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
       const saldo = Math.max(total - pagado, 0);
       if (saldo <= 0 && estadoTexto !== 'PENDIENTE') continue;
 
-      const aula = alumno.tbl_aulas;
-      const grado = aula?.tbl_grados;
-      const nivel = grado?.tbl_niveles?.nombre || '';
       const padre = alumno.tbl_padres_alumnos?.tbl_padres;
-      const pagos = estado?.tbl_pagos_pension || [];
-      const ultimoPago = pagos[pagos.length - 1] || null;
-      const observaciones = pagos
-        .filter(p => p.observacion)
-        .map(p => {
-          const fecha = p.fecha_pago ? p.fecha_pago.toISOString().split('T')[0] : 'Sin fecha';
-          return `${fecha}: ${p.observacion}`;
-        })
-        .join(' | ');
 
       rows.push({
-        Nivel: nivel,
-        Grado: grado?.nombre || '',
-        Seccion: aula?.seccion || '',
-        Aula: grado ? `${grado.nombre} ${aula?.seccion || ''}`.trim() : '',
-        Codigo_Alumno: alumno.codigo_alumno,
-        DNI_Alumno: alumno.dni || '',
+        'Código de alumno': alumno.codigo_alumno,
         Alumno: alumno.nombre_completo,
-        Apoderado: padre?.nombre_completo || '',
-        DNI_Apoderado: padre?.dni || '',
-        Celular_Apoderado: padre?.celular || '',
+        Celular: padre?.celular || '',
         Concepto: conceptoSeleccionado.nombre,
-        Estado: estadoTexto === 'PAGO_PARCIAL' ? 'PAGO PARCIAL' : 'PENDIENTE',
-        Monto_Total: total,
-        Total_Pagado: pagado,
-        Saldo_Pendiente: saldo,
-        Fecha_Ultimo_Pago: ultimoPago?.fecha_pago ? ultimoPago.fecha_pago.toISOString().split('T')[0] : '',
-        Monto_Ultimo_Pago: ultimoPago ? Number(ultimoPago.monto || 0) : '',
-        Observacion: observaciones,
+        Saldo: saldo,
       });
     }
 
-    const resumen = [{
-      Fecha_Consulta: new Date().toISOString(),
-      Anio_Escolar: anioActivo.anio,
-      Concepto: conceptoSeleccionado.nombre,
-      Alumnos_Deudores: rows.length,
-      Saldo_Total: rows.reduce((sum, row) => sum + Number(row.Saldo_Pendiente || 0), 0),
-    }];
+    const saldoTotal = rows.reduce((sum, row) => sum + Number(row.Saldo || 0), 0);
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), 'Resumen');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Deudores');
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
@@ -1347,7 +1315,7 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
         concepto: conceptoSeleccionado.clave,
         concepto_nombre: conceptoSeleccionado.nombre,
         deudores: rows.length,
-        saldo_total: resumen[0].Saldo_Total,
+        saldo_total: saldoTotal,
         filtros: { id_aula, id_grado, id_nivel },
       },
     });
