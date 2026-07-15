@@ -1099,125 +1099,61 @@ const exportarReportePagosExcel = async (req, res) => {
       include: {
         tbl_aulas: { include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } } },
         tbl_padres_alumnos: { include: { tbl_padres: { select: { nombre_completo: true, dni: true, celular: true } } } },
-        tbl_estado_pension: {
-          include: {
-            tbl_pagos_pension: {
-              include: { tbl_usuarios: { select: { nombres: true } } },
-              orderBy: { fecha_pago: 'asc' },
-            },
-          },
-        },
+        tbl_estado_pension: { where: { id_plantilla: plantilla.id } },
       },
       orderBy: { codigo_alumno: 'asc' },
     });
 
-    const matriz = [];
-    const historial = [];
-    const resumen = [];
+    const deudas = [];
 
     for (const alumno of alumnos) {
-      const aula = alumno.tbl_aulas;
-      const nivel = aula?.tbl_grados?.tbl_niveles?.nombre || '';
-      const grado = aula?.tbl_grados?.nombre || '';
-      const seccion = aula?.seccion || '';
       const padre = alumno.tbl_padres_alumnos?.tbl_padres;
       const estados = new Map((alumno.tbl_estado_pension || []).map(e => [e.clave_mes, e]));
 
-      const fila = {
-        Nivel: nivel,
-        Grado: grado,
-        Seccion: seccion,
-        Codigo: alumno.codigo_alumno,
-        DNI: alumno.dni || '',
-        Alumno: alumno.nombre_completo,
-        Apoderado: padre?.nombre_completo || '',
-        DNI_Apoderado: padre?.dni || '',
-        Celular_Apoderado: padre?.celular || '',
-        Matricula: alumno.monto_matricula !== null && alumno.monto_matricula !== undefined ? Number(alumno.monto_matricula) : '',
-        Materiales: alumno.monto_materiales !== null && alumno.monto_materiales !== undefined ? Number(alumno.monto_materiales) : '',
-        Pension: alumno.monto_pension !== null && alumno.monto_pension !== undefined ? Number(alumno.monto_pension) : '',
-      };
-
-      let totalPagadoAlumno = 0;
-      let saldoAlumno = 0;
-
       for (const mes of meses) {
         const estado = estados.get(mes.clave);
-        const total = estado?.monto_total !== null && estado?.monto_total !== undefined
-          ? Number(estado.monto_total)
-          : Number(alumno.monto_pension || 0);
-        const pagado = Number(estado?.monto_pagado || 0);
         const estadoTexto = estado?.estado || 'PENDIENTE';
-        const saldo = (estadoTexto === 'PENDIENTE' || estadoTexto === 'PAGO_PARCIAL') ? Math.max(total - pagado, 0) : 0;
+        if (!['PENDIENTE', 'PAGO_PARCIAL'].includes(estadoTexto)) continue;
 
-        fila[`${mes.nombre}_Estado`] = estadoTexto;
-        fila[`${mes.nombre}_Total`] = total || '';
-        fila[`${mes.nombre}_Pagado`] = pagado || '';
-        fila[`${mes.nombre}_Saldo`] = saldo || '';
-        fila[`${mes.nombre}_Observacion`] = estado?.observacion_no_corresponde || '';
+        const conceptoCompleto = `${mes.clave} ${mes.nombre}`;
+        const total = montoTotalVigente(alumno, conceptoCompleto, estado);
+        const pagado = Number(estado?.monto_pagado || 0);
+        const saldo = Math.max(total - pagado, 0);
+        if (saldo <= 0) continue;
 
-        totalPagadoAlumno += pagado;
-        saldoAlumno += saldo;
-
-        for (const pago of estado?.tbl_pagos_pension || []) {
-          historial.push({
-            Codigo_Ticket: pago.codigo_ticket || '',
-            Fecha_Pago: pago.fecha_pago ? pago.fecha_pago.toISOString().split('T')[0] : '',
-            Nivel: nivel,
-            Grado: grado,
-            Seccion: seccion,
-            Codigo_Alumno: alumno.codigo_alumno,
-            DNI_Alumno: alumno.dni || '',
-            Alumno: alumno.nombre_completo,
-            Concepto: mes.nombre,
-            Estado_Mes: estadoTexto,
-            Monto_Total: total || '',
-            Monto_Pago: Number(pago.monto || 0),
-            Pagado_Acumulado: pagado || '',
-            Saldo: Math.max(total - pagado, 0) || '',
-            Observacion: pago.observacion || '',
-            Registrado_Por: pago.tbl_usuarios?.nombres || '',
-          });
-        }
+        deudas.push({
+          'Código de alumno': alumno.codigo_alumno,
+          Alumno: alumno.nombre_completo,
+          Celular: padre?.celular || '',
+          Concepto: mes.nombre,
+          Saldo: saldo,
+        });
       }
-
-      fila.Total_Pagado = totalPagadoAlumno;
-      fila.Saldo = saldoAlumno;
-      matriz.push(fila);
     }
 
-    const totales = matriz.reduce((acc, fila) => {
-      acc.alumnos += 1;
-      acc.total_pagado += Number(fila.Total_Pagado || 0);
-      acc.saldo += Number(fila.Saldo || 0);
-      return acc;
-    }, { alumnos: 0, total_pagado: 0, saldo: 0 });
-    resumen.push({
-      Fecha_Exportacion: new Date().toISOString(),
-      Anio_Escolar: anioActivo.anio,
-      Alumnos: totales.alumnos,
-      Total_Pagado: totales.total_pagado,
-      Saldo: totales.saldo,
-      Pagos_Historial: historial.length,
+    const deudaTotal = deudas.reduce((sum, fila) => sum + Number(fila.Saldo || 0), 0);
+    const cantidadDeudas = deudas.length;
+    deudas.push({
+      Alumno: 'TOTAL',
+      Celular: '',
+      Concepto: '',
+      Saldo: deudaTotal,
     });
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), 'Resumen');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(matriz), 'Matriz pagos');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(historial), 'Historial pagos');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(deudas), 'Deudas');
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
     await registrarAuditoria({
       userId: req.user.id,
       accion: 'EXPORTAR_REPORTE_PAGOS_EXCEL',
       tipoEntidad: 'tbl_estado_pension',
-      resumen: `Exportacion de reporte general de pagos (${matriz.length} alumnos)`,
+      resumen: `Exportacion de reporte general de deudas (${cantidadDeudas} deudas)`,
       req,
       meta: {
         anio: anioActivo.anio,
-        alumnos: matriz.length,
-        pagos_historial: historial.length,
-        saldo: totales.saldo,
+        deudas: cantidadDeudas,
+        saldo: deudaTotal,
       },
     });
 
