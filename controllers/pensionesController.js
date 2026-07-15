@@ -1524,8 +1524,12 @@ const guardarPlantilla = async (req, res) => {
   if (claves.some(c => !c || c.length > 20)) {
     return res.status(400).json({ error: 'Cada clave debe tener entre 1 y 20 caracteres' });
   }
-  const personalizadoSinMonto = meses.some(m => m.tipo === 'personalizado'
-    && (!Number.isFinite(Number(m.monto)) || Number(m.monto) <= 0));
+  const personalizadoSinMonto = meses.some(m => {
+    const descriptor = normalizarTexto(`${m.clave || ''} ${m.nombre || ''}`);
+    const usaMontoAlumno = descriptor.includes('MATRICULA') || descriptor.includes('MATERIAL');
+    return m.tipo === 'personalizado' && !usaMontoAlumno
+      && (!Number.isFinite(Number(m.monto)) || Number(m.monto) <= 0);
+  });
   if (personalizadoSinMonto) {
     return res.status(400).json({ error: 'Cada pago personalizado debe tener un monto mayor a cero' });
   }
