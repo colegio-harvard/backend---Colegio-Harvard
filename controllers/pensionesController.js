@@ -636,7 +636,17 @@ const obtenerDetalleMes = async (req, res) => {
     });
 
     if (!estado) {
-      return res.json({ data: { estado: 'PENDIENTE', monto_total: null, monto_pagado: 0, pagos: [] } });
+      const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
+      const plantilla = anioActivo ? await prisma.tbl_plantilla_pension.findFirst({
+        where: { id_anio_escolar: anioActivo.id },
+      }) : null;
+      const alumno = await prisma.tbl_alumnos.findUnique({
+        where: { id: parseInt(id_alumno) },
+        select: selectAlumnoTicket,
+      });
+      const concepto = normalizarMesesPlantilla(plantilla?.meses_json).find(m => m.clave === clave_mes);
+      const montoTotal = alumno ? montoTotalVigente(alumno, concepto || clave_mes, null) : null;
+      return res.json({ data: { estado: 'PENDIENTE', monto_total: montoTotal, monto_pagado: 0, pagos: [] } });
     }
 
     let acumulado = 0;
@@ -715,12 +725,18 @@ const registrarPago = async (req, res) => {
       where: { id_alumno_clave_mes: { id_alumno: parseInt(id_alumno), clave_mes: String(clave_mes) } },
     });
 
+    const conceptoPlantilla = normalizarMesesPlantilla(plantilla.meses_json)
+      .find(m => m.clave === String(clave_mes));
+    const montoConfigurado = montoTotalVigente(alumno, conceptoPlantilla || String(clave_mes), existente);
+
     const fechaHoy = todayLima().date;
     let ticketEmitido = null;
 
     if (estado === 'PAGADO') {
       // Marcar como pagado completo
-      const montoTotal = monto_total ? parseFloat(monto_total) : null;
+      const montoTotal = montoConfigurado > 0
+        ? montoConfigurado
+        : (monto_total ? parseFloat(monto_total) : null);
 
       const ep = await prisma.tbl_estado_pension.upsert({
         where: { id_alumno_clave_mes: { id_alumno: parseInt(id_alumno), clave_mes: String(clave_mes) } },
@@ -769,7 +785,7 @@ const registrarPago = async (req, res) => {
         return res.status(400).json({ error: 'monto_total y monto_pago son obligatorios para pago parcial' });
       }
 
-      const montoTotal = parseFloat(monto_total);
+      const montoTotal = montoConfigurado > 0 ? montoConfigurado : parseFloat(monto_total);
       const montoPago = parseFloat(monto_pago);
       if (Number.isNaN(montoTotal) || montoTotal <= 0 || Number.isNaN(montoPago) || montoPago < 0) {
         return res.status(400).json({ error: 'Montos invalidos para pago parcial' });
