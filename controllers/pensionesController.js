@@ -1298,7 +1298,14 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
       });
     }
 
+    const deudoresCount = rows.length;
     const saldoTotal = rows.reduce((sum, row) => sum + Number(row.Saldo || 0), 0);
+    rows.push({
+      Alumno: 'TOTAL',
+      Celular: '',
+      Concepto: '',
+      Saldo: saldoTotal,
+    });
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Deudores');
@@ -1308,13 +1315,13 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
       userId: req.user.id,
       accion: 'EXPORTAR_DEUDORES_PENSION',
       tipoEntidad: 'tbl_estado_pension',
-      resumen: `Exportacion de deudores para ${conceptoSeleccionado.nombre}: ${rows.length} alumnos`,
+      resumen: `Exportacion de deudores para ${conceptoSeleccionado.nombre}: ${deudoresCount} alumnos`,
       req,
       meta: {
         anio: anioActivo.anio,
         concepto: conceptoSeleccionado.clave,
         concepto_nombre: conceptoSeleccionado.nombre,
-        deudores: rows.length,
+        deudores: deudoresCount,
         saldo_total: saldoTotal,
         filtros: { id_aula, id_grado, id_nivel },
       },
