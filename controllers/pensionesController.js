@@ -16,12 +16,18 @@ const formatFechaIso = (fecha) => {
 
 const normalizarMesesPlantilla = (mesesRaw) => {
   const meses = Array.isArray(mesesRaw) ? mesesRaw : [];
-  return meses.map(m => ({
-    clave: m.clave || m.clave_mes || m.mes || '',
-    nombre: m.nombre || m.label || m.clave || m.clave_mes || m.mes || '',
-    tipo: m.tipo || 'mes',
-    comentario: m.comentario || '',
-  })).filter(m => m.clave);
+  return meses.map(m => {
+    const clave = m.clave || m.clave_mes || m.mes || '';
+    const nombre = m.nombre || m.label || clave;
+    const tipo = m.tipo || 'mes';
+    let monto = m.monto !== undefined && m.monto !== null && m.monto !== '' ? Number(m.monto) : null;
+    // Compatibilidad con los dos adicionales creados antes de existir el campo monto.
+    if (tipo === 'personalizado' && monto === null
+        && ['ADICIONAL JULIO', 'ADICIONAL DICIEMBRE'].includes(normalizarTexto(nombre))) {
+      monto = 50;
+    }
+    return { clave, nombre, tipo, comentario: m.comentario || '', monto };
+  }).filter(m => m.clave);
 };
 
 const nombreConcepto = (plantilla, claveMes) => {
@@ -29,12 +35,15 @@ const nombreConcepto = (plantilla, claveMes) => {
   return mes?.nombre || claveMes;
 };
 
-const montoBaseConceptoAlumno = (alumno, claveMes) => {
+const montoBaseConceptoAlumno = (alumno, claveMes, montoPersonalizado = null) => {
   const clave = normalizarTexto(claveMes);
   if (clave.includes('MATRICULA')) return alumno.monto_matricula;
   if (clave.includes('MATERIAL')) {
     if (alumno.monto_materiales === null || alumno.monto_materiales === undefined) return null;
     return Math.min(Number(alumno.monto_materiales), 150);
+  }
+  if (montoPersonalizado !== null && montoPersonalizado !== undefined && Number.isFinite(Number(montoPersonalizado))) {
+    return Number(montoPersonalizado);
   }
   return alumno.monto_pension;
 };
@@ -44,7 +53,13 @@ const montoBaseConceptoAlumno = (alumno, claveMes) => {
 // la deuda siga abierta, la fuente de verdad es la tarifa vigente del alumno.
 const montoTotalVigente = (alumno, concepto, estado) => {
   const estadoTexto = estado?.estado || 'PENDIENTE';
-  const montoActual = montoBaseConceptoAlumno(alumno, concepto);
+  const descriptor = typeof concepto === 'object'
+    ? `${concepto.clave || ''} ${concepto.nombre || ''}`
+    : concepto;
+  const montoPersonalizado = typeof concepto === 'object' && concepto.tipo === 'personalizado'
+    ? concepto.monto
+    : null;
+  const montoActual = montoBaseConceptoAlumno(alumno, descriptor, montoPersonalizado);
   if (['PENDIENTE', 'PAGO_PARCIAL'].includes(estadoTexto)
       && montoActual !== null && montoActual !== undefined) {
     return Number(montoActual);
@@ -639,8 +654,9 @@ const obtenerDetalleMes = async (req, res) => {
       pagos.push(pagoConTicket);
     }
 
-    const conceptoDetalle = `${clave_mes} ${nombreConcepto(estado.tbl_plantilla_pension, clave_mes)}`;
-    const montoActualAlumno = montoBaseConceptoAlumno(estado.tbl_alumnos, conceptoDetalle);
+    const conceptoDetalle = normalizarMesesPlantilla(estado.tbl_plantilla_pension?.meses_json)
+      .find(m => m.clave === clave_mes);
+    const montoActualAlumno = montoTotalVigente(estado.tbl_alumnos, conceptoDetalle || clave_mes, estado);
     const montoTotalDetalle = ['PENDIENTE', 'PAGO_PARCIAL'].includes(estado.estado) && montoActualAlumno !== null && montoActualAlumno !== undefined
       ? Number(montoActualAlumno)
       : (estado.monto_total ? Number(estado.monto_total) : null);
@@ -1115,8 +1131,7 @@ const exportarReportePagosExcel = async (req, res) => {
         const estadoTexto = estado?.estado || 'PENDIENTE';
         if (!['PENDIENTE', 'PAGO_PARCIAL'].includes(estadoTexto)) continue;
 
-        const conceptoCompleto = `${mes.clave} ${mes.nombre}`;
-        const total = montoTotalVigente(alumno, conceptoCompleto, estado);
+        const total = montoTotalVigente(alumno, mes, estado);
         const pagado = Number(estado?.monto_pagado || 0);
         const saldo = Math.max(total - pagado, 0);
         if (saldo <= 0) continue;
@@ -1217,8 +1232,7 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
       const estadoTexto = estado?.estado || 'PENDIENTE';
       if (estadoTexto === 'PAGADO' || estadoTexto === 'NO_CORRESPONDE') continue;
 
-      const conceptoCompleto = `${conceptoSeleccionado.clave} ${conceptoSeleccionado.nombre}`;
-      const total = montoTotalVigente(alumno, conceptoCompleto, estado);
+      const total = montoTotalVigente(alumno, conceptoSeleccionado, estado);
       const pagado = Number(estado?.monto_pagado || 0);
       const saldo = Math.max(total - pagado, 0);
       if (saldo <= 0 && estadoTexto !== 'PENDIENTE') continue;
@@ -1356,8 +1370,7 @@ const dashboardPensiones = async (_req, res) => {
         const stats = conceptoMap.get(concepto.clave);
         const estado = estados.get(concepto.clave);
         const estadoTexto = estado?.estado || 'PENDIENTE';
-        const conceptoCompleto = `${concepto.clave} ${concepto.nombre}`;
-        const total = montoTotalVigente(alumno, conceptoCompleto, estado);
+        const total = montoTotalVigente(alumno, concepto, estado);
         const pagado = Number(estado?.monto_pagado || 0);
         const deuda = (estadoTexto === 'PENDIENTE' || estadoTexto === 'PAGO_PARCIAL') ? Math.max(total - pagado, 0) : 0;
 
@@ -1510,6 +1523,11 @@ const guardarPlantilla = async (req, res) => {
   }
   if (claves.some(c => !c || c.length > 20)) {
     return res.status(400).json({ error: 'Cada clave debe tener entre 1 y 20 caracteres' });
+  }
+  const personalizadoSinMonto = meses.some(m => m.tipo === 'personalizado'
+    && (!Number.isFinite(Number(m.monto)) || Number(m.monto) <= 0));
+  if (personalizadoSinMonto) {
+    return res.status(400).json({ error: 'Cada pago personalizado debe tener un monto mayor a cero' });
   }
 
   try {
