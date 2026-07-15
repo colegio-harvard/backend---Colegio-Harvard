@@ -32,7 +32,10 @@ const nombreConcepto = (plantilla, claveMes) => {
 const montoBaseConceptoAlumno = (alumno, claveMes) => {
   const clave = normalizarTexto(claveMes);
   if (clave.includes('MATRICULA')) return alumno.monto_matricula;
-  if (clave.includes('MATERIAL')) return alumno.monto_materiales;
+  if (clave.includes('MATERIAL')) {
+    if (alumno.monto_materiales === null || alumno.monto_materiales === undefined) return null;
+    return Math.min(Number(alumno.monto_materiales), 150);
+  }
   return alumno.monto_pension;
 };
 
@@ -1278,7 +1281,8 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
       const estadoTexto = estado?.estado || 'PENDIENTE';
       if (estadoTexto === 'PAGADO' || estadoTexto === 'NO_CORRESPONDE') continue;
 
-      const total = montoTotalVigente(alumno, conceptoSeleccionado.clave, estado);
+      const conceptoCompleto = `${conceptoSeleccionado.clave} ${conceptoSeleccionado.nombre}`;
+      const total = montoTotalVigente(alumno, conceptoCompleto, estado);
       const pagado = Number(estado?.monto_pagado || 0);
       const saldo = Math.max(total - pagado, 0);
       if (saldo <= 0 && estadoTexto !== 'PENDIENTE') continue;
@@ -1441,7 +1445,8 @@ const dashboardPensiones = async (_req, res) => {
         const stats = conceptoMap.get(concepto.clave);
         const estado = estados.get(concepto.clave);
         const estadoTexto = estado?.estado || 'PENDIENTE';
-        const total = montoTotalVigente(alumno, concepto.clave, estado);
+        const conceptoCompleto = `${concepto.clave} ${concepto.nombre}`;
+        const total = montoTotalVigente(alumno, conceptoCompleto, estado);
         const pagado = Number(estado?.monto_pagado || 0);
         const deuda = (estadoTexto === 'PENDIENTE' || estadoTexto === 'PAGO_PARCIAL') ? Math.max(total - pagado, 0) : 0;
 
