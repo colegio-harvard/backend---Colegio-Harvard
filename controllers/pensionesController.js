@@ -36,6 +36,19 @@ const montoBaseConceptoAlumno = (alumno, claveMes) => {
   return alumno.monto_pension;
 };
 
+// Los estados pendientes pueden conservar un monto_total antiguo (por ejemplo,
+// si la tarifa del alumno se corrigio despues de crear la cuadricula). Mientras
+// la deuda siga abierta, la fuente de verdad es la tarifa vigente del alumno.
+const montoTotalVigente = (alumno, concepto, estado) => {
+  const estadoTexto = estado?.estado || 'PENDIENTE';
+  const montoActual = montoBaseConceptoAlumno(alumno, concepto);
+  if (['PENDIENTE', 'PAGO_PARCIAL'].includes(estadoTexto)
+      && montoActual !== null && montoActual !== undefined) {
+    return Number(montoActual);
+  }
+  return Number(estado?.monto_total ?? montoActual ?? 0);
+};
+
 const normalizarTexto = (value) => String(value || '')
   .normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '')
@@ -1265,8 +1278,7 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
       const estadoTexto = estado?.estado || 'PENDIENTE';
       if (estadoTexto === 'PAGADO' || estadoTexto === 'NO_CORRESPONDE') continue;
 
-      const totalRaw = estado?.monto_total ?? montoBaseConceptoAlumno(alumno, conceptoSeleccionado.clave);
-      const total = Number(totalRaw || 0);
+      const total = montoTotalVigente(alumno, conceptoSeleccionado.clave, estado);
       const pagado = Number(estado?.monto_pagado || 0);
       const saldo = Math.max(total - pagado, 0);
       if (saldo <= 0 && estadoTexto !== 'PENDIENTE') continue;
@@ -1429,7 +1441,7 @@ const dashboardPensiones = async (_req, res) => {
         const stats = conceptoMap.get(concepto.clave);
         const estado = estados.get(concepto.clave);
         const estadoTexto = estado?.estado || 'PENDIENTE';
-        const total = Number((estado?.monto_total ?? montoBaseConceptoAlumno(alumno, concepto.clave)) || 0);
+        const total = montoTotalVigente(alumno, concepto.clave, estado);
         const pagado = Number(estado?.monto_pagado || 0);
         const deuda = (estadoTexto === 'PENDIENTE' || estadoTexto === 'PAGO_PARCIAL') ? Math.max(total - pagado, 0) : 0;
 
