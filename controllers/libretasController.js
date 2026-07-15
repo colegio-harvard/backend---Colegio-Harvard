@@ -144,14 +144,25 @@ const eliminarCurso = async (req, res) => {
 const asignarCurso = async (req, res) => {
   try {
     const anio = await anioActivo();
-    const { id_aula, id_curso, id_docente } = req.body;
-    if (!anio || !id_aula || !id_curso || !id_docente) return res.status(400).json({ error: 'Complete aula, curso y docente' });
-    const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_asignaciones_academicas"
-      (id_anio_escolar,id_aula,id_curso,id_docente,creado_por) VALUES ($1,$2,$3,$4,$5)
-      ON CONFLICT (id_anio_escolar,id_aula,id_curso) DO UPDATE SET id_docente=EXCLUDED.id_docente,activo=TRUE
-      RETURNING *`, anio.id, Number(id_aula), Number(id_curso), Number(id_docente), req.user.id);
-    await registrarAuditoria({ userId: req.user.id, accion: 'ASIGNAR_CURSO_DOCENTE', tipoEntidad: 'tbl_asignaciones_academicas', idEntidad: rows[0].id, resumen: `Asignación académica aula ${id_aula}, curso ${id_curso}, docente ${id_docente}` });
-    res.json({ data: rows[0] });
+    const { id_aula, id_docente } = req.body;
+    const seleccion = Array.isArray(req.body.id_cursos) && req.body.id_cursos.length ? req.body.id_cursos : [req.body.id_curso];
+    const idsCursos = [...new Set(seleccion.map(Number).filter(Boolean))];
+    if (!anio || !id_aula || !idsCursos.length || !id_docente) return res.status(400).json({ error: 'Complete aula, uno o más cursos y docente' });
+    const cursosValidos = await prisma.$queryRawUnsafe(`SELECT id FROM "tbl_cursos_academicos" WHERE activo=TRUE AND id=ANY($1::int[])`, idsCursos);
+    if (cursosValidos.length !== idsCursos.length) return res.status(400).json({ error: 'Uno de los cursos seleccionados ya no está activo' });
+    const rows = await prisma.$transaction(async tx => {
+      const guardadas = [];
+      for (const idCurso of idsCursos) {
+        const result = await tx.$queryRawUnsafe(`INSERT INTO "tbl_asignaciones_academicas"
+          (id_anio_escolar,id_aula,id_curso,id_docente,creado_por) VALUES ($1,$2,$3,$4,$5)
+          ON CONFLICT (id_anio_escolar,id_aula,id_curso) DO UPDATE SET id_docente=EXCLUDED.id_docente,activo=TRUE
+          RETURNING *`, anio.id, Number(id_aula), idCurso, Number(id_docente), req.user.id);
+        guardadas.push(result[0]);
+      }
+      return guardadas;
+    });
+    await registrarAuditoria({ userId: req.user.id, accion: 'ASIGNAR_CURSOS_DOCENTE', tipoEntidad: 'tbl_asignaciones_academicas', idEntidad: rows[0]?.id, resumen: `${idsCursos.length} curso(s) asignado(s) al docente ${id_docente} en el aula ${id_aula}`, req });
+    res.json({ data: rows, mensaje: `${rows.length} curso(s) asignado(s) correctamente` });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar la asignación' }); }
 };
 
