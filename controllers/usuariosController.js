@@ -87,6 +87,10 @@ const actualizar = async (req, res) => {
   const id = parseInt(req.params.id);
 
   try {
+    const usuarioActual = await prisma.tbl_usuarios.findUnique({ where: { id }, include: { tbl_roles: true } });
+    if (!usuarioActual) return res.status(404).json({ error: 'Usuario no encontrado' });
+    const rolNuevo = id_rol ? await prisma.tbl_roles.findUnique({ where: { id: Number(id_rol) } }) : usuarioActual.tbl_roles;
+    if (!rolNuevo) return res.status(400).json({ error: 'Rol no válido' });
     const data = {};
     if (nombres) data.nombres = nombres;
     if (id_rol) data.id_rol = id_rol;
@@ -94,8 +98,14 @@ const actualizar = async (req, res) => {
     data.user_id_modification = req.user.id;
     data.date_time_modification = new Date();
 
-    await prisma.tbl_usuarios.update({ where: { id }, data });
-    await registrarAuditoria({ userId: req.user.id, accion: 'ACTUALIZAR_USUARIO', tipoEntidad: 'tbl_usuarios', idEntidad: id, resumen: `Usuario ${id} actualizado` });
+    await prisma.$transaction(async tx => {
+      await tx.tbl_usuarios.update({ where: { id }, data });
+      if (!['TUTOR', 'DOCENTE'].includes(rolNuevo.codigo)) {
+        await tx.tbl_asignaciones_tutor.deleteMany({ where: { id_usuario_tutor: id } });
+        await tx.$executeRawUnsafe(`UPDATE "tbl_asignaciones_academicas" SET activo=FALSE WHERE id_docente=$1`, id);
+      }
+    });
+    await registrarAuditoria({ userId: req.user.id, accion: 'ACTUALIZAR_USUARIO', tipoEntidad: 'tbl_usuarios', idEntidad: id, resumen: `Usuario ${id} actualizado: rol ${usuarioActual.tbl_roles.codigo} → ${rolNuevo.codigo}`, req });
 
     res.json({ mensaje: 'Usuario actualizado' });
   } catch (error) {
