@@ -1546,6 +1546,27 @@ const guardarPlantilla = async (req, res) => {
       const clavesAnteriores = mesAnterior.map(m => m.clave || m.clave_mes || m.mes || '').filter(Boolean);
       const clavesNuevas = new Set(claves);
 
+      // Convertir los antiguos pagos personalizados de Matricula/Materiales en
+      // conceptos fijos sin perder estados ni pagos asociados.
+      for (const conceptoAnterior of mesAnterior) {
+        const claveAnterior = conceptoAnterior.clave || conceptoAnterior.clave_mes || conceptoAnterior.mes || '';
+        const nombreAnterior = normalizarTexto(conceptoAnterior.nombre || conceptoAnterior.label || '');
+        const claveFija = nombreAnterior === 'MATRICULA'
+          ? 'MATRICULA'
+          : nombreAnterior === 'MATERIALES' ? 'MATERIALES' : null;
+        if (!claveFija || claveAnterior === claveFija || !clavesNuevas.has(claveFija)) continue;
+
+        const existeClaveFija = await prisma.tbl_estado_pension.findFirst({
+          where: { id_plantilla: existente.id, clave_mes: claveFija },
+        });
+        if (!existeClaveFija) {
+          await prisma.tbl_estado_pension.updateMany({
+            where: { id_plantilla: existente.id, clave_mes: claveAnterior },
+            data: { clave_mes: claveFija },
+          });
+        }
+      }
+
       // Migracion inversa: claves compuestas (MAR_1) → claves simples (MAR)
       for (const claveVieja of clavesAnteriores) {
         if (!clavesNuevas.has(claveVieja) && claveVieja.includes('_')) {
