@@ -27,6 +27,7 @@ const landingRoutes = require('./routes/landingRoutes');
 const notifPersonalizadasRoutes = require('./routes/notifPersonalizadasRoutes');
 const archivosRoutes = require('./routes/archivosRoutes');
 const backupRoutes = require('./routes/backupRoutes');
+const libretasRoutes = require('./routes/libretasRoutes');
 
 // --- Controller para cron ---
 const { ejecutarAlertasNoLlego } = require('./controllers/alertasController');
@@ -77,6 +78,7 @@ app.use('/api/landing', landingRoutes);
 app.use('/api/notificaciones-personalizadas', notifPersonalizadasRoutes);
 app.use('/api/archivos', archivosRoutes);
 app.use('/api/backup', backupRoutes);
+app.use('/api/libretas', libretasRoutes);
 
 // --- Ruta de prueba ---
 app.get('/api/ping', async (req, res) => {
