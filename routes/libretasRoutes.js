@@ -14,7 +14,11 @@ router.post('/comentarios-docente', accesoAcademico, ctrl.guardarComentarioDocen
 router.post('/acompanamiento', verificarRol('SUPER_ADMIN', 'TUTOR'), ctrl.guardarAcompanamiento);
 
 router.post('/areas', verificarRol('SUPER_ADMIN'), ctrl.crearArea);
+router.put('/areas/:id', verificarRol('SUPER_ADMIN'), ctrl.actualizarArea);
+router.delete('/areas/:id', verificarRol('SUPER_ADMIN'), ctrl.eliminarArea);
 router.post('/cursos', verificarRol('SUPER_ADMIN'), ctrl.crearCurso);
+router.put('/cursos/:id', verificarRol('SUPER_ADMIN'), ctrl.actualizarCurso);
+router.delete('/cursos/:id', verificarRol('SUPER_ADMIN'), ctrl.eliminarCurso);
 router.post('/asignaciones', verificarRol('SUPER_ADMIN'), ctrl.asignarCurso);
 router.put('/periodos/:id', verificarRol('SUPER_ADMIN'), ctrl.cambiarPeriodo);
 router.post('/catalogo', verificarRol('SUPER_ADMIN'), ctrl.guardarCatalogo);

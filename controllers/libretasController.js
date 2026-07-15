@@ -36,7 +36,7 @@ const bootstrap = async (req, res) => {
     const params = esSuper(req) ? [anio.id] : [anio.id, req.user.id];
     const [areas, cursos, periodos, catalogo, criterios, asignaciones] = await Promise.all([
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_areas_academicas" WHERE activo=TRUE ORDER BY orden,nombre'),
-      prisma.$queryRawUnsafe(`SELECT c.*, a.nombre area FROM "tbl_cursos_academicos" c JOIN "tbl_areas_academicas" a ON a.id=c.id_area WHERE c.activo=TRUE ORDER BY a.orden,c.orden,c.nombre`),
+      prisma.$queryRawUnsafe(`SELECT c.*, a.nombre area FROM "tbl_cursos_academicos" c JOIN "tbl_areas_academicas" a ON a.id=c.id_area WHERE c.activo=TRUE AND a.activo=TRUE ORDER BY a.orden,c.orden,c.nombre`),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_periodos_academicos" WHERE id_anio_escolar=$1 ORDER BY numero', anio.id),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_catalogo_libreta" WHERE activo=TRUE ORDER BY tipo,categoria,orden,texto'),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_criterios_conducta" WHERE activo=TRUE ORDER BY orden,nombre'),
@@ -45,7 +45,7 @@ const bootstrap = async (req, res) => {
         FROM "tbl_asignaciones_academicas" aa JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
         JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area JOIN "tbl_aulas" a ON a.id=aa.id_aula
         JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_usuarios" u ON u.id=aa.id_docente
-        WHERE aa.id_anio_escolar=$1 AND aa.activo=TRUE ${filtroDocente}
+        WHERE aa.id_anio_escolar=$1 AND aa.activo=TRUE AND c.activo=TRUE AND ar.activo=TRUE ${filtroDocente}
         ORDER BY g.orden,a.seccion,ar.orden,c.orden`, ...params),
     ]);
     let aulas = [], docentes = [];
@@ -67,6 +67,12 @@ const crearArea = async (req, res) => {
   try {
     const nombre = String(req.body.nombre || '').trim();
     if (!nombre) return res.status(400).json({ error: 'Ingrese el nombre del área' });
+    const repetida = await prisma.$queryRawUnsafe(`SELECT id,activo FROM "tbl_areas_academicas" WHERE LOWER(TRIM(nombre))=LOWER(TRIM($1)) LIMIT 1`, nombre);
+    if (repetida[0]?.activo) return res.status(409).json({ error: 'Esta área ya existe' });
+    if (repetida[0]) {
+      const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_areas_academicas" SET nombre=$1,activo=TRUE,orden=$2 WHERE id=$3 RETURNING *`, nombre, Number(req.body.orden || 0), repetida[0].id);
+      return res.json({ data: rows[0] });
+    }
     const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_areas_academicas" (nombre,orden,creado_por)
       VALUES ($1,$2,$3) ON CONFLICT (nombre) DO UPDATE SET activo=TRUE,orden=EXCLUDED.orden RETURNING *`, nombre, Number(req.body.orden || 0), req.user.id);
     res.status(201).json({ data: rows[0] });
@@ -78,10 +84,61 @@ const crearCurso = async (req, res) => {
     const nombre = String(req.body.nombre || '').trim();
     const idArea = Number(req.body.id_area);
     if (!nombre || !idArea) return res.status(400).json({ error: 'Área y curso son obligatorios' });
+    const repetido = await prisma.$queryRawUnsafe(`SELECT id,activo FROM "tbl_cursos_academicos" WHERE id_area=$1 AND LOWER(TRIM(nombre))=LOWER(TRIM($2)) LIMIT 1`, idArea, nombre);
+    if (repetido[0]?.activo) return res.status(409).json({ error: 'Este curso ya existe dentro del área seleccionada' });
+    if (repetido[0]) {
+      const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_cursos_academicos" SET nombre=$1,activo=TRUE,orden=$2 WHERE id=$3 RETURNING *`, nombre, Number(req.body.orden || 0), repetido[0].id);
+      return res.json({ data: rows[0] });
+    }
     const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_cursos_academicos" (id_area,nombre,orden,creado_por)
       VALUES ($1,$2,$3,$4) ON CONFLICT (id_area,nombre) DO UPDATE SET activo=TRUE,orden=EXCLUDED.orden RETURNING *`, idArea, nombre, Number(req.body.orden || 0), req.user.id);
     res.status(201).json({ data: rows[0] });
   } catch { res.status(500).json({ error: 'No se pudo guardar el curso' }); }
+};
+
+const actualizarArea = async (req, res) => {
+  try {
+    const id = Number(req.params.id), nombre = String(req.body.nombre || '').trim();
+    if (!id || !nombre) return res.status(400).json({ error: 'Ingrese el nombre del área' });
+    const repetida = await prisma.$queryRawUnsafe(`SELECT id FROM "tbl_areas_academicas" WHERE id<>$1 AND activo=TRUE AND LOWER(TRIM(nombre))=LOWER(TRIM($2)) LIMIT 1`, id, nombre);
+    if (repetida[0]) return res.status(409).json({ error: 'Ya existe otra área con ese nombre' });
+    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_areas_academicas" SET nombre=$1,orden=$2 WHERE id=$3 RETURNING *`, nombre, Number(req.body.orden || 0), id);
+    if (!rows[0]) return res.status(404).json({ error: 'Área no encontrada' });
+    res.json({ data: rows[0] });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo editar el área' }); }
+};
+
+const eliminarArea = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await prisma.$transaction(async tx => {
+      await tx.$executeRawUnsafe(`UPDATE "tbl_areas_academicas" SET activo=FALSE WHERE id=$1`, id);
+      await tx.$executeRawUnsafe(`UPDATE "tbl_cursos_academicos" SET activo=FALSE WHERE id_area=$1`, id);
+    });
+    await registrarAuditoria({ userId:req.user.id, accion:'DESACTIVAR_AREA_ACADEMICA', tipoEntidad:'tbl_areas_academicas', idEntidad:id, resumen:'Área académica desactivada; se conserva su historial', req });
+    res.json({ mensaje: 'Área retirada de la configuración. Su historial se conserva.' });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo retirar el área' }); }
+};
+
+const actualizarCurso = async (req, res) => {
+  try {
+    const id = Number(req.params.id), nombre = String(req.body.nombre || '').trim(), idArea = Number(req.body.id_area);
+    if (!id || !nombre || !idArea) return res.status(400).json({ error: 'Área y curso son obligatorios' });
+    const repetido = await prisma.$queryRawUnsafe(`SELECT id FROM "tbl_cursos_academicos" WHERE id<>$1 AND id_area=$2 AND activo=TRUE AND LOWER(TRIM(nombre))=LOWER(TRIM($3)) LIMIT 1`, id, idArea, nombre);
+    if (repetido[0]) return res.status(409).json({ error: 'Ya existe otro curso con ese nombre dentro del área' });
+    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_cursos_academicos" SET nombre=$1,id_area=$2,orden=$3 WHERE id=$4 RETURNING *`, nombre, idArea, Number(req.body.orden || 0), id);
+    if (!rows[0]) return res.status(404).json({ error: 'Curso no encontrado' });
+    res.json({ data: rows[0] });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo editar el curso' }); }
+};
+
+const eliminarCurso = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await prisma.$executeRawUnsafe(`UPDATE "tbl_cursos_academicos" SET activo=FALSE WHERE id=$1`, id);
+    await registrarAuditoria({ userId:req.user.id, accion:'DESACTIVAR_CURSO_ACADEMICO', tipoEntidad:'tbl_cursos_academicos', idEntidad:id, resumen:'Curso académico desactivado; se conserva su historial', req });
+    res.json({ mensaje: 'Curso retirado de la configuración. Sus notas históricas se conservan.' });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo retirar el curso' }); }
 };
 
 const asignarCurso = async (req, res) => {
@@ -275,4 +332,4 @@ const libreta = async (req, res) => {
   } catch(error){console.error(error);res.status(500).json({error:'No se pudo generar la libreta'});}
 };
 
-module.exports={bootstrap,crearArea,crearCurso,asignarCurso,cambiarPeriodo,obtenerNotas,guardarNotas,guardarComentarioDocente,guardarAcompanamiento,guardarCatalogo,cambiarCatalogo,auditoriaNotas,merito,libreta};
+module.exports={bootstrap,crearArea,actualizarArea,eliminarArea,crearCurso,actualizarCurso,eliminarCurso,asignarCurso,cambiarPeriodo,obtenerNotas,guardarNotas,guardarComentarioDocente,guardarAcompanamiento,guardarCatalogo,cambiarCatalogo,auditoriaNotas,merito,libreta};
