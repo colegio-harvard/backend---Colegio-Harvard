@@ -140,6 +140,23 @@ const obtenerPensionesAlumno = async (idAlumno, idAnioEscolar) => {
   };
 };
 
+const obtenerPensionesEscaneo = async (req, res) => {
+  try {
+    const idAlumno = Number(req.params.idAlumno);
+    if (!idAlumno) return res.status(400).json({ error: 'Alumno inválido' });
+    const [anioActivo, alumno] = await Promise.all([
+      prisma.tbl_anios_escolares.findFirst({ where: { activo: true } }),
+      prisma.tbl_alumnos.findUnique({ where: { id: idAlumno }, select: { id: true } }),
+    ]);
+    if (!anioActivo || !alumno) return res.status(404).json({ error: 'Alumno o año escolar no encontrado' });
+    const pensiones = await obtenerPensionesAlumno(idAlumno, anioActivo.id);
+    res.json({ data: pensiones });
+  } catch (error) {
+    console.error('Error al cargar pensiones del escaneo:', error);
+    res.status(500).json({ error: 'No se pudieron cargar las pensiones' });
+  }
+};
+
 // FLW-06/07: Registro automatico de ingreso/salida (QR o PIN)
 const registrarEvento = async (req, res) => {
   const { qr_token, codigo_alumno } = req.body;
@@ -203,6 +220,20 @@ const registrarEvento = async (req, res) => {
       where: { id_alumno: alumno.id, fecha_evento: fechaHoy, id_anio_escolar: anioActivo.id },
       orderBy: { fecha_hora_evento: 'asc' },
     });
+
+    // Protección en servidor: nunca convertir un doble escaneo inmediato en salida.
+    const ultimoEvento = eventosHoy[eventosHoy.length - 1];
+    if (ultimoEvento?.fecha_hora_evento) {
+      const transcurridoMs = Date.now() - new Date(ultimoEvento.fecha_hora_evento).getTime();
+      if (transcurridoMs >= 0 && transcurridoMs < 5000) {
+        const segundosRestantes = Math.max(1, Math.ceil((5000 - transcurridoMs) / 1000));
+        return res.status(429).json({
+          error: `Este mismo QR acaba de registrarse. Espere ${segundosRestantes} segundo${segundosRestantes === 1 ? '' : 's'} para volver a marcar.`,
+          codigo: 'QR_REPETIDO',
+          segundos_restantes: segundosRestantes,
+        });
+      }
+    }
 
     const tieneCheckin = eventosHoy.some(e => e.tipo_evento === 'CHECKIN');
     const tieneCheckout = eventosHoy.some(e => e.tipo_evento === 'CHECKOUT');
@@ -290,7 +321,6 @@ const registrarEvento = async (req, res) => {
       hora: toUtcIso(ahora),
     });
 
-    const pensiones = await obtenerPensionesAlumno(alumno.id, anioActivo.id);
     const aulaNombre = alumno.tbl_aulas
       ? `${alumno.tbl_aulas.tbl_grados?.nombre || ''} ${alumno.tbl_aulas.seccion || ''}`.trim()
       : null;
@@ -304,8 +334,9 @@ const registrarEvento = async (req, res) => {
         fecha_hora: toUtcIso(ahora),
         metodo,
         codigo_alumno: alumno.codigo_alumno,
+        id_alumno: alumno.id,
         dni: alumno.dni,
-        pensiones,
+        pensiones: null,
       },
     });
   } catch (error) {
@@ -1201,7 +1232,7 @@ const dashboardAdmin = async (req, res) => {
   }
 };
 
-module.exports = { registrarEvento, calendarioPadre, obtenerHijosPadre, asistenciaHoyTutor, obtenerAulasTutor, asistenciaGlobal, exportarExcel, corregirAsistencia, historialPorteria, dashboardAdmin };
+module.exports = { registrarEvento, obtenerPensionesEscaneo, calendarioPadre, obtenerHijosPadre, asistenciaHoyTutor, obtenerAulasTutor, asistenciaGlobal, exportarExcel, corregirAsistencia, historialPorteria, dashboardAdmin };
 
 
 
