@@ -168,20 +168,33 @@ const registrarEvento = async (req, res) => {
   else return res.status(400).json({ error: 'Debe enviar qr_token o codigo_alumno' });
 
   try {
+    const alumnoScanSelect = {
+      id: true,
+      id_aula: true,
+      codigo_alumno: true,
+      nombre_completo: true,
+      dni: true,
+      foto_url: true,
+      estado: true,
+      tbl_aulas: {
+        select: {
+          seccion: true,
+          tbl_grados: { select: { nombre: true, id_nivel: true } },
+        },
+      },
+    };
     const alumnoPromise = metodo === 'QR'
       ? prisma.tbl_carnets.findUnique({
         where: { qr_token },
-        include: {
+        select: {
           tbl_alumnos: {
-            include: {
-              tbl_aulas: { include: { tbl_grados: true } },
-            },
+            select: alumnoScanSelect,
           },
         },
       })
       : prisma.tbl_alumnos.findUnique({
         where: { codigo_alumno },
-        include: { tbl_aulas: { include: { tbl_grados: true } } },
+        select: alumnoScanSelect,
       });
 
     const [alumnoResultado, anioActivo, asignacion, puntoExistente] = await Promise.all([
