@@ -194,15 +194,18 @@ const registrarEvento = async (req, res) => {
       return res.status(403).json({ error: 'Alumno retirado: registro bloqueado.' });
     }
 
-    const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
+    const [anioActivo, asignacion, puntoExistente] = await Promise.all([
+      prisma.tbl_anios_escolares.findFirst({ where: { activo: true } }),
+      prisma.tbl_asignaciones_porteria.findUnique({ where: { id_usuario_porteria: req.user.id } }),
+      prisma.tbl_puntos_escaneo.findFirst({ where: { activo: true }, orderBy: { id: 'asc' } }),
+    ]);
     if (!anioActivo) return res.status(400).json({ error: 'No hay ano escolar activo' });
 
     let idPuntoEscaneo;
-    const asignacion = await prisma.tbl_asignaciones_porteria.findUnique({ where: { id_usuario_porteria: req.user.id } });
     if (asignacion) {
       idPuntoEscaneo = asignacion.id_punto_escaneo;
     } else if (['SUPER_ADMIN', 'ADMIN', 'PORTERIA'].includes(req.user.rol_codigo)) {
-      let puntoDefault = await prisma.tbl_puntos_escaneo.findFirst({ where: { activo: true }, orderBy: { id: 'asc' } });
+      let puntoDefault = puntoExistente;
       if (!puntoDefault) {
         puntoDefault = await prisma.tbl_puntos_escaneo.create({
           data: { nombre: 'Punto principal', activo: true, user_id_registration: req.user.id },
@@ -216,10 +219,16 @@ const registrarEvento = async (req, res) => {
     const ahora = utcNow();
     const { date: fechaHoy } = todayLima();
 
-    const eventosHoy = await prisma.tbl_eventos_asistencia.findMany({
-      where: { id_alumno: alumno.id, fecha_evento: fechaHoy, id_anio_escolar: anioActivo.id },
-      orderBy: { fecha_hora_evento: 'asc' },
-    });
+    const idNivel = alumno.tbl_aulas?.tbl_grados?.id_nivel;
+    const [eventosHoy, horarioNivel] = await Promise.all([
+      prisma.tbl_eventos_asistencia.findMany({
+        where: { id_alumno: alumno.id, fecha_evento: fechaHoy, id_anio_escolar: anioActivo.id },
+        orderBy: { fecha_hora_evento: 'asc' },
+      }),
+      idNivel ? prisma.tbl_horarios_nivel.findUnique({
+        where: { id_nivel_id_anio_escolar: { id_nivel: idNivel, id_anio_escolar: anioActivo.id } },
+      }) : Promise.resolve(null),
+    ]);
 
     // Protección en servidor: nunca convertir un doble escaneo inmediato en salida.
     const ultimoEvento = eventosHoy[eventosHoy.length - 1];
@@ -257,14 +266,9 @@ const registrarEvento = async (req, res) => {
       },
     });
 
+    let estadoAsistencia = null;
     if (tipoEvento === 'CHECKIN') {
-      // Obtener horario del nivel (configuracion general por nivel)
-      const grado = await prisma.tbl_grados.findUnique({ where: { id: alumno.tbl_aulas.id_grado } });
-      const horarioNivel = grado ? await prisma.tbl_horarios_nivel.findUnique({
-        where: { id_nivel_id_anio_escolar: { id_nivel: grado.id_nivel, id_anio_escolar: anioActivo.id } },
-      }) : null;
-
-      let estadoAsistencia = 'PRESENTE';
+      estadoAsistencia = 'PRESENTE';
       if (horarioNivel) {
         const horaInicioMs = timeFieldToMs(horarioNivel.hora_inicio);
         const toleranciaMs = horarioNivel.tolerancia_tardanza_min * 60000;
@@ -278,48 +282,12 @@ const registrarEvento = async (req, res) => {
         create: { id_anio_escolar: anioActivo.id, id_alumno: alumno.id, fecha: fechaHoy, estado: estadoAsistencia, id_evento_checkin: evento.id, user_id_registration: req.user.id },
       });
 
-      await prisma.tbl_alertas.updateMany({
-        where: { id_alumno: alumno.id, fecha: fechaHoy, tipo: 'NO_LLEGO', estado: 'ABIERTA' },
-        data: { estado: 'CERRADA', cerrada_en: ahora },
-      });
-
-      // Obtener vinculo con padre (se usa para cierre de alerta y notif tardanza)
-      const vinculoPadre = await prisma.tbl_padres_alumnos.findUnique({
-        where: { id_alumno: alumno.id },
-        include: { tbl_padres: { select: { id_usuario: true } } },
-      });
-      if (vinculoPadre?.tbl_padres?.id_usuario) {
-        emitToUser(vinculoPadre.tbl_padres.id_usuario, 'alerta:cerrada', { id_alumno: alumno.id });
-      }
-
-      // Notificar tardanza al padre (respeta plantilla configurada)
-      if (estadoAsistencia === 'TARDE' && vinculoPadre?.tbl_padres?.id_usuario) {
-        const limaTimeMs = currentLimaTimeMs();
-        const horas = Math.floor(limaTimeMs / 3600000);
-        const minutos = Math.floor((limaTimeMs % 3600000) / 60000);
-        const horaStr = `${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}`;
-        await enviarNotificacion('TARDANZA', vinculoPadre.tbl_padres.id_usuario, {
-          alumno: alumno.nombre_completo,
-          fecha: todayLima().iso,
-          hora: horaStr,
-        }, { fecha: fechaHoy, referencia_id: alumno.id });
-      }
-
     } else if (tipoEvento === 'CHECKOUT') {
       await prisma.tbl_asistencia_dia.update({
         where: { id_alumno_fecha: { id_alumno: alumno.id, fecha: fechaHoy } },
         data: { id_evento_checkout: evento.id, user_id_modification: req.user.id, date_time_modification: ahora },
       });
     }
-
-    await registrarAuditoria({ userId: req.user.id, accion: 'REGISTRO_ASISTENCIA', tipoEntidad: 'tbl_eventos_asistencia', idEntidad: evento.id, resumen: `${tipoEvento} ${metodo} alumno ${alumno.nombre_completo}` });
-
-    // Emitir evento de asistencia al aula del tutor
-    emitToAula(alumno.id_aula, 'asistencia:evento', {
-      alumno: alumno.nombre_completo,
-      tipo_evento: tipoEvento,
-      hora: toUtcIso(ahora),
-    });
 
     const aulaNombre = alumno.tbl_aulas
       ? `${alumno.tbl_aulas.tbl_grados?.nombre || ''} ${alumno.tbl_aulas.seccion || ''}`.trim()
@@ -338,6 +306,61 @@ const registrarEvento = async (req, res) => {
         dni: alumno.dni,
         pensiones: null,
       },
+    });
+
+    // Todo lo que no define el resultado inmediato continúa después de liberar la cámara.
+    setImmediate(async () => {
+      const tareasPosteriores = [
+        registrarAuditoria({
+          userId: req.user.id,
+          accion: 'REGISTRO_ASISTENCIA',
+          tipoEntidad: 'tbl_eventos_asistencia',
+          idEntidad: evento.id,
+          resumen: `${tipoEvento} ${metodo} alumno ${alumno.nombre_completo}`,
+          req,
+        }),
+      ];
+
+      emitToAula(alumno.id_aula, 'asistencia:evento', {
+        alumno: alumno.nombre_completo,
+        tipo_evento: tipoEvento,
+        hora: toUtcIso(ahora),
+      });
+
+      if (tipoEvento === 'CHECKIN') {
+        tareasPosteriores.push(
+          prisma.tbl_alertas.updateMany({
+            where: { id_alumno: alumno.id, fecha: fechaHoy, tipo: 'NO_LLEGO', estado: 'ABIERTA' },
+            data: { estado: 'CERRADA', cerrada_en: ahora },
+          }),
+          (async () => {
+            const vinculoPadre = await prisma.tbl_padres_alumnos.findUnique({
+              where: { id_alumno: alumno.id },
+              include: { tbl_padres: { select: { id_usuario: true } } },
+            });
+            const idUsuarioPadre = vinculoPadre?.tbl_padres?.id_usuario;
+            if (!idUsuarioPadre) return;
+
+            emitToUser(idUsuarioPadre, 'alerta:cerrada', { id_alumno: alumno.id });
+            if (estadoAsistencia !== 'TARDE') return;
+
+            const limaTimeMs = currentLimaTimeMs();
+            const horas = Math.floor(limaTimeMs / 3600000);
+            const minutos = Math.floor((limaTimeMs % 3600000) / 60000);
+            const horaStr = `${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}`;
+            await enviarNotificacion('TARDANZA', idUsuarioPadre, {
+              alumno: alumno.nombre_completo,
+              fecha: todayLima().iso,
+              hora: horaStr,
+            }, { fecha: fechaHoy, referencia_id: alumno.id });
+          })(),
+        );
+      }
+
+      const resultados = await Promise.allSettled(tareasPosteriores);
+      resultados
+        .filter(({ status }) => status === 'rejected')
+        .forEach(({ reason }) => console.error('Error en efecto posterior de asistencia:', reason));
     });
   } catch (error) {
     console.error('Error al registrar evento:', error);
