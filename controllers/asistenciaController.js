@@ -168,9 +168,8 @@ const registrarEvento = async (req, res) => {
   else return res.status(400).json({ error: 'Debe enviar qr_token o codigo_alumno' });
 
   try {
-    let alumno;
-    if (metodo === 'QR') {
-      const carnet = await prisma.tbl_carnets.findUnique({
+    const alumnoPromise = metodo === 'QR'
+      ? prisma.tbl_carnets.findUnique({
         where: { qr_token },
         include: {
           tbl_alumnos: {
@@ -179,14 +178,25 @@ const registrarEvento = async (req, res) => {
             },
           },
         },
-      });
-      if (!carnet) return res.status(404).json({ error: 'Carnet no reconocido. Verifique el QR.' });
-      alumno = carnet.tbl_alumnos;
-    } else {
-      alumno = await prisma.tbl_alumnos.findUnique({
+      })
+      : prisma.tbl_alumnos.findUnique({
         where: { codigo_alumno },
         include: { tbl_aulas: { include: { tbl_grados: true } } },
       });
+
+    const [alumnoResultado, anioActivo, asignacion, puntoExistente] = await Promise.all([
+      alumnoPromise,
+      prisma.tbl_anios_escolares.findFirst({ where: { activo: true } }),
+      prisma.tbl_asignaciones_porteria.findUnique({ where: { id_usuario_porteria: req.user.id } }),
+      prisma.tbl_puntos_escaneo.findFirst({ where: { activo: true }, orderBy: { id: 'asc' } }),
+    ]);
+
+    let alumno;
+    if (metodo === 'QR') {
+      if (!alumnoResultado) return res.status(404).json({ error: 'Carnet no reconocido. Verifique el QR.' });
+      alumno = alumnoResultado.tbl_alumnos;
+    } else {
+      alumno = alumnoResultado;
       if (!alumno) return res.status(404).json({ error: 'Codigo de alumno incorrecto.' });
     }
 
@@ -194,11 +204,6 @@ const registrarEvento = async (req, res) => {
       return res.status(403).json({ error: 'Alumno retirado: registro bloqueado.' });
     }
 
-    const [anioActivo, asignacion, puntoExistente] = await Promise.all([
-      prisma.tbl_anios_escolares.findFirst({ where: { activo: true } }),
-      prisma.tbl_asignaciones_porteria.findUnique({ where: { id_usuario_porteria: req.user.id } }),
-      prisma.tbl_puntos_escaneo.findFirst({ where: { activo: true }, orderBy: { id: 'asc' } }),
-    ]);
     if (!anioActivo) return res.status(400).json({ error: 'No hay ano escolar activo' });
 
     let idPuntoEscaneo;
@@ -267,6 +272,7 @@ const registrarEvento = async (req, res) => {
     });
 
     let estadoAsistencia = null;
+    const tareasRegistroDiario = [];
     if (tipoEvento === 'CHECKIN') {
       estadoAsistencia = 'PRESENTE';
       if (horarioNivel) {
@@ -276,17 +282,17 @@ const registrarEvento = async (req, res) => {
         estadoAsistencia = horaActualMs <= (horaInicioMs + toleranciaMs) ? 'PRESENTE' : 'TARDE';
       }
 
-      await prisma.tbl_asistencia_dia.upsert({
+      tareasRegistroDiario.push(prisma.tbl_asistencia_dia.upsert({
         where: { id_alumno_fecha: { id_alumno: alumno.id, fecha: fechaHoy } },
         update: { estado: estadoAsistencia, id_evento_checkin: evento.id, user_id_modification: req.user.id, date_time_modification: ahora },
         create: { id_anio_escolar: anioActivo.id, id_alumno: alumno.id, fecha: fechaHoy, estado: estadoAsistencia, id_evento_checkin: evento.id, user_id_registration: req.user.id },
-      });
+      }));
 
     } else if (tipoEvento === 'CHECKOUT') {
-      await prisma.tbl_asistencia_dia.update({
+      tareasRegistroDiario.push(prisma.tbl_asistencia_dia.update({
         where: { id_alumno_fecha: { id_alumno: alumno.id, fecha: fechaHoy } },
         data: { id_evento_checkout: evento.id, user_id_modification: req.user.id, date_time_modification: ahora },
-      });
+      }));
     }
 
     const aulaNombre = alumno.tbl_aulas
@@ -311,6 +317,7 @@ const registrarEvento = async (req, res) => {
     // Todo lo que no define el resultado inmediato continúa después de liberar la cámara.
     setImmediate(async () => {
       const tareasPosteriores = [
+        ...tareasRegistroDiario,
         registrarAuditoria({
           userId: req.user.id,
           accion: 'REGISTRO_ASISTENCIA',
