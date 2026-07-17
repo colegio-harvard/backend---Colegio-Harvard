@@ -329,16 +329,18 @@ const libreta = async (req, res) => {
       LEFT JOIN "tbl_padres_alumnos" pa ON pa.id_alumno=al.id LEFT JOIN "tbl_padres" p ON p.id=pa.id_padre
       LEFT JOIN "tbl_asignaciones_tutor" t ON t.id_aula=a.id LEFT JOIN "tbl_usuarios" u ON u.id=t.id_usuario_tutor WHERE al.id=$1`,idAlumno))[0];
     if(!alumno) return res.status(404).json({error:'Alumno no encontrado'});
-    const notas=await prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion
+    const [notas, conducta, observaciones] = await Promise.all([
+      prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion
       FROM "tbl_notas_academicas" n JOIN "tbl_asignaciones_academicas" aa ON aa.id=n.id_asignacion
       JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
-      JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo WHERE n.id_alumno=$1 AND aa.id_anio_escolar=$2 ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0));
-    const conducta=await prisma.$queryRawUnsafe(`SELECT c.nombre,p.numero,n.calificacion FROM "tbl_notas_conducta" n
+      JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo WHERE n.id_alumno=$1 AND aa.id_anio_escolar=$2 ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0)),
+      prisma.$queryRawUnsafe(`SELECT c.nombre,p.numero,n.calificacion FROM "tbl_notas_conducta" n
       JOIN "tbl_criterios_conducta" c ON c.id=n.id_criterio JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo
-      WHERE n.id_alumno=$1 ORDER BY c.orden,p.numero`,idAlumno);
-    const observaciones=await prisma.$queryRawUnsafe(`SELECT o.tipo,p.numero,c.texto,u.nombres autor FROM "tbl_observaciones_libreta" o
+      WHERE n.id_alumno=$1 ORDER BY c.orden,p.numero`,idAlumno),
+      prisma.$queryRawUnsafe(`SELECT o.tipo,p.numero,c.texto,u.nombres autor FROM "tbl_observaciones_libreta" o
       JOIN "tbl_catalogo_libreta" c ON c.id=o.id_catalogo JOIN "tbl_periodos_academicos" p ON p.id=o.id_periodo
-      JOIN "tbl_usuarios" u ON u.id=o.creado_por WHERE o.id_alumno=$1 ORDER BY p.numero,o.tipo`,idAlumno);
+      JOIN "tbl_usuarios" u ON u.id=o.creado_por WHERE o.id_alumno=$1 ORDER BY p.numero,o.tipo`,idAlumno),
+    ]);
     res.json({data:{alumno,notas,conducta,observaciones}});
   } catch(error){console.error(error);res.status(500).json({error:'No se pudo generar la libreta'});}
 };
