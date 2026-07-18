@@ -3,6 +3,8 @@ const { registrarAuditoria } = require('../middleware/auditMiddleware');
 
 const esSuper = req => req.user.rol_codigo === 'SUPER_ADMIN';
 const notaValida = value => ['AD', 'A', 'B', 'C'].includes(String(value || '').toUpperCase());
+const notaNumericaValida = value => value !== '' && value !== null && Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 20;
+const letraDesdeNumero = value => Number(value) >= 16 ? 'AD' : Number(value) >= 11 ? 'A' : Number(value) >= 6 ? 'B' : 'C';
 const FRASE_INSTITUCIONAL_DEFAULT = '24 años formando generaciones, más de 2800 estudiantes y miles de historias que nos inspiran a seguir creciendo juntos.';
 
 const anioActivo = () => prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
@@ -16,11 +18,11 @@ const asegurarPeriodos = async (idAnio, userId) => {
 
 const obtenerAsignacion = async (id, req) => {
   const rows = await prisma.$queryRawUnsafe(`
-    SELECT aa.*, c.nombre curso, ar.nombre area, a.seccion, g.nombre grado
+    SELECT aa.*, c.nombre curso, ar.nombre area, a.seccion, g.nombre grado,n.nombre nivel
     FROM "tbl_asignaciones_academicas" aa
     JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
     JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
-    JOIN "tbl_aulas" a ON a.id=aa.id_aula JOIN "tbl_grados" g ON g.id=a.id_grado
+    JOIN "tbl_aulas" a ON a.id=aa.id_aula JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_niveles" n ON n.id=g.id_nivel
     WHERE aa.id=$1 AND aa.activo=TRUE`, Number(id));
   const item = rows[0];
   if (!item) return null;
@@ -43,10 +45,10 @@ const bootstrap = async (req, res) => {
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_criterios_conducta" WHERE activo=TRUE ORDER BY orden,nombre'),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_criterios_padre" WHERE activo=TRUE ORDER BY orden,nombre'),
       prisma.$queryRawUnsafe(`SELECT aa.id,aa.id_aula,aa.id_curso,aa.id_docente,c.nombre curso,ar.nombre area,
-        g.nombre grado,a.seccion,u.nombres docente
+        g.nombre grado,a.seccion,n.nombre nivel,u.nombres docente
         FROM "tbl_asignaciones_academicas" aa JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
         JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area JOIN "tbl_aulas" a ON a.id=aa.id_aula
-        JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_usuarios" u ON u.id=aa.id_docente
+        JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_niveles" n ON n.id=g.id_nivel JOIN "tbl_usuarios" u ON u.id=aa.id_docente
         WHERE aa.id_anio_escolar=$1 AND aa.activo=TRUE AND c.activo=TRUE AND ar.activo=TRUE ${filtroDocente}
         ORDER BY g.orden,a.seccion,ar.orden,c.orden`, ...params),
     ]);
@@ -85,16 +87,17 @@ const crearArea = async (req, res) => {
 const crearCurso = async (req, res) => {
   try {
     const nombre = String(req.body.nombre || '').trim();
+    const nivel = String(req.body.nivel || 'INICIAL').toUpperCase();
     const idArea = Number(req.body.id_area);
     if (!nombre || !idArea) return res.status(400).json({ error: 'Área y curso son obligatorios' });
-    const repetido = await prisma.$queryRawUnsafe(`SELECT id,activo FROM "tbl_cursos_academicos" WHERE id_area=$1 AND LOWER(TRIM(nombre))=LOWER(TRIM($2)) LIMIT 1`, idArea, nombre);
+    const repetido = await prisma.$queryRawUnsafe(`SELECT id,activo FROM "tbl_cursos_academicos" WHERE id_area=$1 AND LOWER(TRIM(nombre))=LOWER(TRIM($2)) AND nivel=$3 LIMIT 1`, idArea, nombre, nivel);
     if (repetido[0]?.activo) return res.status(409).json({ error: 'Este curso ya existe dentro del área seleccionada' });
     if (repetido[0]) {
       const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_cursos_academicos" SET nombre=$1,activo=TRUE,orden=$2 WHERE id=$3 RETURNING *`, nombre, Number(req.body.orden || 0), repetido[0].id);
       return res.json({ data: rows[0] });
     }
-    const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_cursos_academicos" (id_area,nombre,orden,creado_por)
-      VALUES ($1,$2,$3,$4) ON CONFLICT (id_area,nombre) DO UPDATE SET activo=TRUE,orden=EXCLUDED.orden RETURNING *`, idArea, nombre, Number(req.body.orden || 0), req.user.id);
+    const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_cursos_academicos" (id_area,nombre,nivel,orden,creado_por)
+      VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id_area,nombre,nivel) DO UPDATE SET activo=TRUE,orden=EXCLUDED.orden RETURNING *`, idArea, nombre, nivel, Number(req.body.orden || 0), req.user.id);
     res.status(201).json({ data: rows[0] });
   } catch { res.status(500).json({ error: 'No se pudo guardar el curso' }); }
 };
@@ -188,7 +191,7 @@ const obtenerNotas = async (req, res) => {
     const filtroAutor = esSuper(req) ? '' : 'AND (n.creado_por=$3 OR n.creado_por IS NULL)';
     const params = esSuper(req) ? [asignacion.id_aula, Number(req.query.id_periodo)] : [asignacion.id_aula, Number(req.query.id_periodo), req.user.id];
     const alumnos = await prisma.$queryRawUnsafe(`SELECT al.id,al.codigo_alumno,al.nombre_completo,al.foto_url,
-      n.id id_nota,n.calificacion,n.creado_por,n.modificado_por,n.modificado_en
+      n.id id_nota,n.calificacion,n.nota_numerica,n.creado_por,n.modificado_por,n.modificado_en
       FROM "tbl_alumnos" al LEFT JOIN "tbl_notas_academicas" n ON n.id_alumno=al.id
         AND n.id_asignacion=${Number(asignacion.id)} AND n.id_periodo=$2 ${filtroAutor}
       WHERE al.id_aula=$1 AND al.estado='ACTIVO' ORDER BY al.nombre_completo`, ...params);
@@ -206,21 +209,26 @@ const guardarNotas = async (req, res) => {
     if (!periodo) return res.status(400).json({ error: 'Periodo inválido' });
     if (!esSuper(req) && periodo.estado !== 'ABIERTO') return res.status(409).json({ error: 'El bimestre no está abierto' });
     const notas = Array.isArray(req.body.notas) ? req.body.notas : [];
-    if (notas.some(n => !notaValida(n.calificacion))) return res.status(400).json({ error: 'Todas las calificaciones deben ser AD, A, B o C' });
+    const esPrimaria = String(asignacion.nivel || '').toUpperCase().includes('PRIMARIA');
+    if (esPrimaria && notas.some(n => !notaNumericaValida(n.nota_numerica))) return res.status(400).json({ error: 'Las notas de Primaria deben estar entre 00 y 20' });
+    if (!esPrimaria && notas.some(n => !notaValida(n.calificacion))) return res.status(400).json({ error: 'Todas las calificaciones deben ser AD, A, B o C' });
     await prisma.$transaction(async tx => {
       for (const item of notas) {
+        const notaNumerica = esPrimaria ? Number(item.nota_numerica) : null;
+        const calificacion = esPrimaria ? letraDesdeNumero(notaNumerica) : String(item.calificacion).toUpperCase();
         const alumno = await tx.$queryRawUnsafe('SELECT id FROM "tbl_alumnos" WHERE id=$1 AND id_aula=$2', Number(item.id_alumno), Number(asignacion.id_aula));
         if (!alumno[0]) throw new Error('ALUMNO_NO_AUTORIZADO');
         const anterior = await tx.$queryRawUnsafe(`SELECT * FROM "tbl_notas_academicas" WHERE id_asignacion=$1 AND id_periodo=$2 AND id_alumno=$3`, idAsignacion, idPeriodo, Number(item.id_alumno));
         if (anterior[0] && !esSuper(req) && Number(anterior[0].creado_por) !== Number(req.user.id)) throw new Error('NOTA_AJENA');
-        if (anterior[0] && anterior[0].calificacion !== item.calificacion && esSuper(req) && !String(req.body.motivo || '').trim()) throw new Error('MOTIVO_REQUERIDO');
+        const modificada = anterior[0] && (anterior[0].calificacion !== calificacion || Number(anterior[0].nota_numerica ?? -1) !== Number(notaNumerica ?? -1));
+        if (modificada && esSuper(req) && !String(req.body.motivo || '').trim()) throw new Error('MOTIVO_REQUERIDO');
         const rows = await tx.$queryRawUnsafe(`INSERT INTO "tbl_notas_academicas"
-          (id_asignacion,id_periodo,id_alumno,calificacion,creado_por) VALUES ($1,$2,$3,$4,$5)
-          ON CONFLICT (id_asignacion,id_periodo,id_alumno) DO UPDATE SET calificacion=EXCLUDED.calificacion,
-          modificado_por=$5,modificado_en=NOW() RETURNING *`, idAsignacion, idPeriodo, Number(item.id_alumno), item.calificacion, req.user.id);
-        if (!anterior[0] || anterior[0].calificacion !== item.calificacion) {
-          await tx.$executeRawUnsafe(`INSERT INTO "tbl_auditoria_notas" (id_nota,calificacion_anterior,calificacion_nueva,motivo,id_usuario)
-            VALUES ($1,$2,$3,$4,$5)`, rows[0].id, anterior[0]?.calificacion || null, item.calificacion, String(req.body.motivo || '').trim() || null, req.user.id);
+          (id_asignacion,id_periodo,id_alumno,calificacion,nota_numerica,creado_por) VALUES ($1,$2,$3,$4,$5,$6)
+          ON CONFLICT (id_asignacion,id_periodo,id_alumno) DO UPDATE SET calificacion=EXCLUDED.calificacion,nota_numerica=EXCLUDED.nota_numerica,
+          modificado_por=$6,modificado_en=NOW() RETURNING *`, idAsignacion, idPeriodo, Number(item.id_alumno), calificacion, notaNumerica, req.user.id);
+        if (!anterior[0] || modificada) {
+          await tx.$executeRawUnsafe(`INSERT INTO "tbl_auditoria_notas" (id_nota,calificacion_anterior,calificacion_nueva,nota_numerica_anterior,nota_numerica_nueva,motivo,id_usuario)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)`, rows[0].id, anterior[0]?.calificacion || null, calificacion, anterior[0]?.nota_numerica ?? null, notaNumerica, String(req.body.motivo || '').trim() || null, req.user.id);
         }
       }
     });
@@ -310,7 +318,7 @@ const cambiarCatalogo = async (req, res) => {
 
 const auditoriaNotas = async (req, res) => {
   try {
-    const rows = await prisma.$queryRawUnsafe(`SELECT au.id,au.fecha,au.calificacion_anterior,au.calificacion_nueva,au.motivo,
+    const rows = await prisma.$queryRawUnsafe(`SELECT au.id,au.fecha,au.calificacion_anterior,au.calificacion_nueva,au.nota_numerica_anterior,au.nota_numerica_nueva,au.motivo,
       u.nombres usuario,al.codigo_alumno,al.nombre_completo alumno,c.nombre curso,p.nombre periodo
       FROM "tbl_auditoria_notas" au JOIN "tbl_usuarios" u ON u.id=au.id_usuario
       JOIN "tbl_notas_academicas" n ON n.id=au.id_nota JOIN "tbl_alumnos" al ON al.id=n.id_alumno
@@ -328,7 +336,7 @@ const merito = async (req, res) => {
     const anio = await anioActivo();
     if (!anio) return res.status(400).json({ error: 'No hay aÃ±o escolar activo' });
     const rows = await prisma.$queryRawUnsafe(`SELECT al.id,al.codigo_alumno,al.nombre_completo,
-      ROUND(AVG(CASE n.calificacion WHEN 'AD' THEN 4 WHEN 'A' THEN 3 WHEN 'B' THEN 2 WHEN 'C' THEN 1 END)::numeric,2) puntaje,
+      ROUND(AVG(COALESCE(n.nota_numerica,CASE n.calificacion WHEN 'AD' THEN 4 WHEN 'A' THEN 3 WHEN 'B' THEN 2 WHEN 'C' THEN 1 END))::numeric,2) puntaje,
       COUNT(n.id)::int evaluaciones
       FROM "tbl_alumnos" al LEFT JOIN "tbl_notas_academicas" n ON n.id_alumno=al.id ${filtro}
         AND EXISTS (SELECT 1 FROM "tbl_asignaciones_academicas" aa WHERE aa.id=n.id_asignacion AND aa.id_anio_escolar=${Number(anio.id)})
@@ -350,7 +358,7 @@ const libreta = async (req, res) => {
       LEFT JOIN "tbl_asignaciones_tutor" t ON t.id_aula=a.id LEFT JOIN "tbl_usuarios" u ON u.id=t.id_usuario_tutor WHERE al.id=$1`,idAlumno))[0];
     if(!alumno) return res.status(404).json({error:'Alumno no encontrado'});
     const [notas, conducta, notasPadre, observaciones, criterios, criteriosPadre] = await Promise.all([
-      prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion
+      prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion,n.nota_numerica
       FROM "tbl_notas_academicas" n JOIN "tbl_asignaciones_academicas" aa ON aa.id=n.id_asignacion
       JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
       JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo WHERE n.id_alumno=$1 AND aa.id_anio_escolar=$2 ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0)),
