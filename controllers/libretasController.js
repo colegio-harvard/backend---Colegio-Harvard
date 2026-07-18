@@ -209,13 +209,14 @@ const guardarNotas = async (req, res) => {
     if (!periodo) return res.status(400).json({ error: 'Periodo inválido' });
     if (!esSuper(req) && periodo.estado !== 'ABIERTO') return res.status(409).json({ error: 'El bimestre no está abierto' });
     const notas = Array.isArray(req.body.notas) ? req.body.notas : [];
-    const esPrimaria = String(asignacion.nivel || '').toUpperCase().includes('PRIMARIA');
-    if (esPrimaria && notas.some(n => !notaNumericaValida(n.nota_numerica))) return res.status(400).json({ error: 'Las notas de Primaria deben estar entre 00 y 20' });
-    if (!esPrimaria && notas.some(n => !notaValida(n.calificacion))) return res.status(400).json({ error: 'Todas las calificaciones deben ser AD, A, B o C' });
+    const nivelAsignacion = String(asignacion.nivel || '').toUpperCase();
+    const esNumerica = nivelAsignacion.includes('PRIMARIA') || nivelAsignacion.includes('SECUNDARIA');
+    if (esNumerica && notas.some(n => !notaNumericaValida(n.nota_numerica))) return res.status(400).json({ error: 'Las notas numéricas deben estar entre 00 y 20' });
+    if (!esNumerica && notas.some(n => !notaValida(n.calificacion))) return res.status(400).json({ error: 'Todas las calificaciones deben ser AD, A, B o C' });
     await prisma.$transaction(async tx => {
       for (const item of notas) {
-        const notaNumerica = esPrimaria ? Number(item.nota_numerica) : null;
-        const calificacion = esPrimaria ? letraDesdeNumero(notaNumerica) : String(item.calificacion).toUpperCase();
+        const notaNumerica = esNumerica ? Number(item.nota_numerica) : null;
+        const calificacion = esNumerica ? letraDesdeNumero(notaNumerica) : String(item.calificacion).toUpperCase();
         const alumno = await tx.$queryRawUnsafe('SELECT id FROM "tbl_alumnos" WHERE id=$1 AND id_aula=$2', Number(item.id_alumno), Number(asignacion.id_aula));
         if (!alumno[0]) throw new Error('ALUMNO_NO_AUTORIZADO');
         const anterior = await tx.$queryRawUnsafe(`SELECT * FROM "tbl_notas_academicas" WHERE id_asignacion=$1 AND id_periodo=$2 AND id_alumno=$3`, idAsignacion, idPeriodo, Number(item.id_alumno));
@@ -357,15 +358,16 @@ const libreta = async (req, res) => {
       LEFT JOIN "tbl_padres_alumnos" pa ON pa.id_alumno=al.id LEFT JOIN "tbl_padres" p ON p.id=pa.id_padre
       LEFT JOIN "tbl_asignaciones_tutor" t ON t.id_aula=a.id LEFT JOIN "tbl_usuarios" u ON u.id=t.id_usuario_tutor WHERE al.id=$1`,idAlumno))[0];
     if(!alumno) return res.status(404).json({error:'Alumno no encontrado'});
-    const esPrimaria = String(alumno.nivel || '').toUpperCase().includes('PRIMARIA');
-    const consultaNotas = esPrimaria
+    const nivelAlumno = String(alumno.nivel || '').toUpperCase();
+    const nivelCatalogo = nivelAlumno.includes('PRIMARIA') ? 'PRIMARIA' : nivelAlumno.includes('SECUNDARIA') ? 'SECUNDARIA' : null;
+    const consultaNotas = nivelCatalogo
       ? prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion,n.nota_numerica
         FROM "tbl_cursos_academicos" c JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
         LEFT JOIN "tbl_asignaciones_academicas" aa ON aa.id_curso=c.id AND aa.id_aula=(SELECT id_aula FROM "tbl_alumnos" WHERE id=$1)
           AND aa.id_anio_escolar=$2 AND aa.activo=TRUE
         LEFT JOIN "tbl_notas_academicas" n ON n.id_asignacion=aa.id AND n.id_alumno=$1
         LEFT JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo
-        WHERE c.activo=TRUE AND ar.activo=TRUE AND c.nivel='PRIMARIA' ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0))
+        WHERE c.activo=TRUE AND ar.activo=TRUE AND c.nivel=$3 ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0),nivelCatalogo)
       : prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion,n.nota_numerica
         FROM "tbl_notas_academicas" n JOIN "tbl_asignaciones_academicas" aa ON aa.id=n.id_asignacion
         JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
