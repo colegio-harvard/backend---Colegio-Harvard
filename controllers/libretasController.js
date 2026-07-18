@@ -188,7 +188,11 @@ const obtenerNotas = async (req, res) => {
     if (!asignacion) return res.status(403).json({ error: 'No tiene acceso a esta asignación' });
     const periodo = await prisma.$queryRawUnsafe('SELECT * FROM "tbl_periodos_academicos" WHERE id=$1', Number(req.query.id_periodo));
     if (!periodo[0] || Number(periodo[0].id_anio_escolar) !== Number(asignacion.id_anio_escolar)) return res.status(400).json({ error: 'Periodo inválido' });
-    const filtroAutor = esSuper(req) ? '' : 'AND (n.creado_por=$3 OR n.creado_por IS NULL)';
+    const filtroAutor = esSuper(req) ? '' : `AND (n.creado_por=$3 OR n.creado_por IS NULL OR EXISTS (
+      SELECT 1 FROM "tbl_usuarios" creador
+      JOIN "tbl_roles" rol_creador ON rol_creador.id=creador.id_rol
+      WHERE creador.id=n.creado_por AND rol_creador.codigo='SUPER_ADMIN'
+    ))`;
     const params = esSuper(req) ? [asignacion.id_aula, Number(req.query.id_periodo)] : [asignacion.id_aula, Number(req.query.id_periodo), req.user.id];
     const alumnos = await prisma.$queryRawUnsafe(`SELECT al.id,al.codigo_alumno,al.nombre_completo,al.foto_url,
       n.id id_nota,n.calificacion,n.nota_numerica,n.creado_por,n.modificado_por,n.modificado_en
@@ -219,8 +223,14 @@ const guardarNotas = async (req, res) => {
         const calificacion = esNumerica ? letraDesdeNumero(notaNumerica) : String(item.calificacion).toUpperCase();
         const alumno = await tx.$queryRawUnsafe('SELECT id FROM "tbl_alumnos" WHERE id=$1 AND id_aula=$2', Number(item.id_alumno), Number(asignacion.id_aula));
         if (!alumno[0]) throw new Error('ALUMNO_NO_AUTORIZADO');
-        const anterior = await tx.$queryRawUnsafe(`SELECT * FROM "tbl_notas_academicas" WHERE id_asignacion=$1 AND id_periodo=$2 AND id_alumno=$3`, idAsignacion, idPeriodo, Number(item.id_alumno));
-        if (anterior[0] && !esSuper(req) && Number(anterior[0].creado_por) !== Number(req.user.id)) throw new Error('NOTA_AJENA');
+        const anterior = await tx.$queryRawUnsafe(`SELECT n.*,r.codigo rol_creador
+          FROM "tbl_notas_academicas" n
+          LEFT JOIN "tbl_usuarios" u ON u.id=n.creado_por
+          LEFT JOIN "tbl_roles" r ON r.id=u.id_rol
+          WHERE n.id_asignacion=$1 AND n.id_periodo=$2 AND n.id_alumno=$3`, idAsignacion, idPeriodo, Number(item.id_alumno));
+        const puedeEditarNota = !anterior[0] || esSuper(req) || anterior[0].creado_por == null ||
+          Number(anterior[0].creado_por) === Number(req.user.id) || anterior[0].rol_creador === 'SUPER_ADMIN';
+        if (!puedeEditarNota) throw new Error('NOTA_AJENA');
         const modificada = anterior[0] && (anterior[0].calificacion !== calificacion || Number(anterior[0].nota_numerica ?? -1) !== Number(notaNumerica ?? -1));
         if (modificada && esSuper(req) && !String(req.body.motivo || '').trim()) throw new Error('MOTIVO_REQUERIDO');
         const rows = await tx.$queryRawUnsafe(`INSERT INTO "tbl_notas_academicas"
