@@ -34,12 +34,13 @@ const bootstrap = async (req, res) => {
     await asegurarPeriodos(anio.id, req.user.id);
     const filtroDocente = esSuper(req) ? '' : 'AND aa.id_docente=$2';
     const params = esSuper(req) ? [anio.id] : [anio.id, req.user.id];
-    const [areas, cursos, periodos, catalogo, criterios, asignaciones] = await Promise.all([
+    const [areas, cursos, periodos, catalogo, criterios, criteriosPadre, asignaciones] = await Promise.all([
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_areas_academicas" WHERE activo=TRUE ORDER BY orden,nombre'),
       prisma.$queryRawUnsafe(`SELECT c.*, a.nombre area FROM "tbl_cursos_academicos" c JOIN "tbl_areas_academicas" a ON a.id=c.id_area WHERE c.activo=TRUE AND a.activo=TRUE ORDER BY a.orden,c.orden,c.nombre`),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_periodos_academicos" WHERE id_anio_escolar=$1 ORDER BY numero', anio.id),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_catalogo_libreta" WHERE activo=TRUE ORDER BY tipo,categoria,orden,texto'),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_criterios_conducta" WHERE activo=TRUE ORDER BY orden,nombre'),
+      prisma.$queryRawUnsafe('SELECT * FROM "tbl_criterios_padre" WHERE activo=TRUE ORDER BY orden,nombre'),
       prisma.$queryRawUnsafe(`SELECT aa.id,aa.id_aula,aa.id_curso,aa.id_docente,c.nombre curso,ar.nombre area,
         g.nombre grado,a.seccion,u.nombres docente
         FROM "tbl_asignaciones_academicas" aa JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
@@ -56,7 +57,7 @@ const bootstrap = async (req, res) => {
       docentes = await prisma.$queryRawUnsafe(`SELECT u.id,u.nombres,r.codigo rol FROM "tbl_usuarios" u JOIN "tbl_roles" r ON r.id=u.id_rol
         WHERE u.estado='ACTIVO' AND r.codigo IN ('TUTOR','DOCENTE') ORDER BY u.nombres`);
     }
-    res.json({ data: { anio, rol: req.user.rol_codigo, areas, cursos, periodos, catalogo, criterios, asignaciones, aulas, docentes } });
+    res.json({ data: { anio, rol: req.user.rol_codigo, areas, cursos, periodos, catalogo, criterios, criteriosPadre, asignaciones, aulas, docentes } });
   } catch (error) {
     console.error('Error bootstrap libretas:', error);
     res.status(500).json({ error: 'No se pudo cargar el módulo de libretas' });
@@ -231,7 +232,7 @@ const guardarNotas = async (req, res) => {
 
 const guardarAcompanamiento = async (req, res) => {
   try {
-    const { id_alumno, id_periodo, conducta = [], observaciones = [] } = req.body;
+    const { id_alumno, id_periodo, conducta = [], nota_padre = [], observaciones = [] } = req.body;
     const aulaTutor = await prisma.$queryRawUnsafe(`SELECT al.id_aula FROM "tbl_alumnos" al
       JOIN "tbl_asignaciones_tutor" t ON t.id_aula=al.id_aula WHERE al.id=$1 AND t.id_usuario_tutor=$2`, Number(id_alumno), req.user.id);
     if (!esSuper(req) && !aulaTutor[0]) return res.status(403).json({ error: 'Solo el tutor del aula puede registrar este apartado' });
@@ -239,6 +240,9 @@ const guardarAcompanamiento = async (req, res) => {
     if (!periodo || (!esSuper(req) && periodo.estado !== 'ABIERTO')) return res.status(409).json({ error: 'El bimestre no está abierto' });
     await prisma.$transaction(async tx => {
       for (const c of conducta) if (notaValida(c.calificacion)) await tx.$executeRawUnsafe(`INSERT INTO "tbl_notas_conducta"
+        (id_alumno,id_periodo,id_criterio,calificacion,creado_por) VALUES ($1,$2,$3,$4,$5)
+        ON CONFLICT (id_alumno,id_periodo,id_criterio) DO UPDATE SET calificacion=EXCLUDED.calificacion,creado_por=$5,modificado_en=NOW()`, Number(id_alumno), Number(id_periodo), Number(c.id_criterio), c.calificacion, req.user.id);
+      for (const c of nota_padre) if (notaValida(c.calificacion)) await tx.$executeRawUnsafe(`INSERT INTO "tbl_notas_padre"
         (id_alumno,id_periodo,id_criterio,calificacion,creado_por) VALUES ($1,$2,$3,$4,$5)
         ON CONFLICT (id_alumno,id_periodo,id_criterio) DO UPDATE SET calificacion=EXCLUDED.calificacion,creado_por=$5,modificado_en=NOW()`, Number(id_alumno), Number(id_periodo), Number(c.id_criterio), c.calificacion, req.user.id);
       for (const o of observaciones) await tx.$executeRawUnsafe(`INSERT INTO "tbl_observaciones_libreta"
@@ -329,7 +333,7 @@ const libreta = async (req, res) => {
       LEFT JOIN "tbl_padres_alumnos" pa ON pa.id_alumno=al.id LEFT JOIN "tbl_padres" p ON p.id=pa.id_padre
       LEFT JOIN "tbl_asignaciones_tutor" t ON t.id_aula=a.id LEFT JOIN "tbl_usuarios" u ON u.id=t.id_usuario_tutor WHERE al.id=$1`,idAlumno))[0];
     if(!alumno) return res.status(404).json({error:'Alumno no encontrado'});
-    const [notas, conducta, observaciones, criterios] = await Promise.all([
+    const [notas, conducta, notasPadre, observaciones, criterios, criteriosPadre] = await Promise.all([
       prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion
       FROM "tbl_notas_academicas" n JOIN "tbl_asignaciones_academicas" aa ON aa.id=n.id_asignacion
       JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
@@ -337,12 +341,16 @@ const libreta = async (req, res) => {
       prisma.$queryRawUnsafe(`SELECT c.nombre,p.numero,n.calificacion FROM "tbl_notas_conducta" n
       JOIN "tbl_criterios_conducta" c ON c.id=n.id_criterio JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo
       WHERE n.id_alumno=$1 ORDER BY c.orden,p.numero`,idAlumno),
+      prisma.$queryRawUnsafe(`SELECT c.nombre,c.id id_criterio,p.numero,n.calificacion FROM "tbl_notas_padre" n
+      JOIN "tbl_criterios_padre" c ON c.id=n.id_criterio JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo
+      WHERE n.id_alumno=$1 ORDER BY c.orden,p.numero`,idAlumno),
       prisma.$queryRawUnsafe(`SELECT o.tipo,p.numero,c.texto,u.nombres autor FROM "tbl_observaciones_libreta" o
       JOIN "tbl_catalogo_libreta" c ON c.id=o.id_catalogo JOIN "tbl_periodos_academicos" p ON p.id=o.id_periodo
       JOIN "tbl_usuarios" u ON u.id=o.creado_por WHERE o.id_alumno=$1 ORDER BY p.numero,o.tipo`,idAlumno),
       prisma.$queryRawUnsafe(`SELECT nombre FROM "tbl_criterios_conducta" WHERE activo=TRUE ORDER BY orden,nombre`),
+      prisma.$queryRawUnsafe(`SELECT id,nombre FROM "tbl_criterios_padre" WHERE activo=TRUE ORDER BY orden,nombre`),
     ]);
-    res.json({data:{alumno,notas,conducta,observaciones,criterios}});
+    res.json({data:{alumno,notas,conducta,notasPadre,observaciones,criterios,criteriosPadre}});
   } catch(error){console.error(error);res.status(500).json({error:'No se pudo generar la libreta'});}
 };
 
