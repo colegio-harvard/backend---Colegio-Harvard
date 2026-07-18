@@ -12,6 +12,7 @@ router.get('/notas', accesoAcademico, ctrl.obtenerNotas);
 router.post('/notas', accesoAcademico, ctrl.guardarNotas);
 router.post('/comentarios-docente', accesoAcademico, ctrl.guardarComentarioDocente);
 router.post('/acompanamiento', verificarRol('SUPER_ADMIN', 'TUTOR'), ctrl.guardarAcompanamiento);
+router.put('/frase-institucional', verificarRol('SUPER_ADMIN'), ctrl.guardarFraseInstitucional);
 
 router.post('/areas', verificarRol('SUPER_ADMIN'), ctrl.crearArea);
 router.put('/areas/:id', verificarRol('SUPER_ADMIN'), ctrl.actualizarArea);

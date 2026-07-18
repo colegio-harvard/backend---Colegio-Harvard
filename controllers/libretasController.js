@@ -3,6 +3,7 @@ const { registrarAuditoria } = require('../middleware/auditMiddleware');
 
 const esSuper = req => req.user.rol_codigo === 'SUPER_ADMIN';
 const notaValida = value => ['AD', 'A', 'B', 'C'].includes(String(value || '').toUpperCase());
+const FRASE_INSTITUCIONAL_DEFAULT = '24 años formando generaciones, más de 2800 estudiantes y miles de historias que nos inspiran a seguir creciendo juntos.';
 
 const anioActivo = () => prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
 
@@ -57,7 +58,8 @@ const bootstrap = async (req, res) => {
       docentes = await prisma.$queryRawUnsafe(`SELECT u.id,u.nombres,r.codigo rol FROM "tbl_usuarios" u JOIN "tbl_roles" r ON r.id=u.id_rol
         WHERE u.estado='ACTIVO' AND r.codigo IN ('TUTOR','DOCENTE') ORDER BY u.nombres`);
     }
-    res.json({ data: { anio, rol: req.user.rol_codigo, areas, cursos, periodos, catalogo, criterios, criteriosPadre, asignaciones, aulas, docentes } });
+    const configuracion = (await prisma.$queryRawUnsafe('SELECT frase_institucional FROM "tbl_configuracion_libreta" WHERE id_anio_escolar=$1', anio.id))[0];
+    res.json({ data: { anio, rol: req.user.rol_codigo, fraseInstitucional: configuracion?.frase_institucional || FRASE_INSTITUCIONAL_DEFAULT, areas, cursos, periodos, catalogo, criterios, criteriosPadre, asignaciones, aulas, docentes } });
   } catch (error) {
     console.error('Error bootstrap libretas:', error);
     res.status(500).json({ error: 'No se pudo cargar el módulo de libretas' });
@@ -274,6 +276,20 @@ const guardarComentarioDocente = async (req, res) => {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el comentario' }); }
 };
 
+const guardarFraseInstitucional = async (req, res) => {
+  try {
+    const frase = String(req.body.frase || '').trim();
+    if (!frase) return res.status(400).json({ error: 'La frase institucional es obligatoria' });
+    if (frase.length > 500) return res.status(400).json({ error: 'La frase no puede superar los 500 caracteres' });
+    const anio = await anioActivo();
+    if (!anio) return res.status(400).json({ error: 'No hay año escolar activo' });
+    await prisma.$executeRawUnsafe(`INSERT INTO "tbl_configuracion_libreta" (id_anio_escolar,frase_institucional,modificado_por)
+      VALUES ($1,$2,$3) ON CONFLICT (id_anio_escolar) DO UPDATE SET frase_institucional=EXCLUDED.frase_institucional,
+      modificado_por=EXCLUDED.modificado_por,modificado_en=NOW()`, anio.id, frase, req.user.id);
+    res.json({ mensaje: 'Frase institucional actualizada', data: { fraseInstitucional: frase } });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo actualizar la frase institucional' }); }
+};
+
 const guardarCatalogo = async (req, res) => {
   try {
     const tipo = String(req.body.tipo || '');
@@ -350,8 +366,9 @@ const libreta = async (req, res) => {
       prisma.$queryRawUnsafe(`SELECT nombre FROM "tbl_criterios_conducta" WHERE activo=TRUE ORDER BY orden,nombre`),
       prisma.$queryRawUnsafe(`SELECT id,nombre FROM "tbl_criterios_padre" WHERE activo=TRUE ORDER BY orden,nombre`),
     ]);
-    res.json({data:{alumno,notas,conducta,notasPadre,observaciones,criterios,criteriosPadre}});
+    const configuracion = (await prisma.$queryRawUnsafe('SELECT frase_institucional FROM "tbl_configuracion_libreta" WHERE id_anio_escolar=$1', Number(alumno.id_anio_escolar || 0)))[0];
+    res.json({data:{alumno,fraseInstitucional:configuracion?.frase_institucional || FRASE_INSTITUCIONAL_DEFAULT,notas,conducta,notasPadre,observaciones,criterios,criteriosPadre}});
   } catch(error){console.error(error);res.status(500).json({error:'No se pudo generar la libreta'});}
 };
 
-module.exports={bootstrap,crearArea,actualizarArea,eliminarArea,crearCurso,actualizarCurso,eliminarCurso,asignarCurso,cambiarPeriodo,obtenerNotas,guardarNotas,guardarComentarioDocente,guardarAcompanamiento,guardarCatalogo,cambiarCatalogo,auditoriaNotas,merito,libreta};
+module.exports={bootstrap,crearArea,actualizarArea,eliminarArea,crearCurso,actualizarCurso,eliminarCurso,asignarCurso,cambiarPeriodo,obtenerNotas,guardarNotas,guardarComentarioDocente,guardarAcompanamiento,guardarFraseInstitucional,guardarCatalogo,cambiarCatalogo,auditoriaNotas,merito,libreta};
