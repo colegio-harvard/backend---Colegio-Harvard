@@ -357,11 +357,21 @@ const libreta = async (req, res) => {
       LEFT JOIN "tbl_padres_alumnos" pa ON pa.id_alumno=al.id LEFT JOIN "tbl_padres" p ON p.id=pa.id_padre
       LEFT JOIN "tbl_asignaciones_tutor" t ON t.id_aula=a.id LEFT JOIN "tbl_usuarios" u ON u.id=t.id_usuario_tutor WHERE al.id=$1`,idAlumno))[0];
     if(!alumno) return res.status(404).json({error:'Alumno no encontrado'});
+    const esPrimaria = String(alumno.nivel || '').toUpperCase().includes('PRIMARIA');
+    const consultaNotas = esPrimaria
+      ? prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion,n.nota_numerica
+        FROM "tbl_cursos_academicos" c JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
+        LEFT JOIN "tbl_asignaciones_academicas" aa ON aa.id_curso=c.id AND aa.id_aula=(SELECT id_aula FROM "tbl_alumnos" WHERE id=$1)
+          AND aa.id_anio_escolar=$2 AND aa.activo=TRUE
+        LEFT JOIN "tbl_notas_academicas" n ON n.id_asignacion=aa.id AND n.id_alumno=$1
+        LEFT JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo
+        WHERE c.activo=TRUE AND ar.activo=TRUE AND c.nivel='PRIMARIA' ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0))
+      : prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion,n.nota_numerica
+        FROM "tbl_notas_academicas" n JOIN "tbl_asignaciones_academicas" aa ON aa.id=n.id_asignacion
+        JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
+        JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo WHERE n.id_alumno=$1 AND aa.id_anio_escolar=$2 ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0));
     const [notas, conducta, notasPadre, observaciones, criterios, criteriosPadre] = await Promise.all([
-      prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion,n.nota_numerica
-      FROM "tbl_notas_academicas" n JOIN "tbl_asignaciones_academicas" aa ON aa.id=n.id_asignacion
-      JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
-      JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo WHERE n.id_alumno=$1 AND aa.id_anio_escolar=$2 ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0)),
+      consultaNotas,
       prisma.$queryRawUnsafe(`SELECT c.nombre,p.numero,n.calificacion FROM "tbl_notas_conducta" n
       JOIN "tbl_criterios_conducta" c ON c.id=n.id_criterio JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo
       WHERE n.id_alumno=$1 ORDER BY c.orden,p.numero`,idAlumno),
