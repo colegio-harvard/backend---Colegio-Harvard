@@ -360,9 +360,12 @@ const libreta = async (req, res) => {
       prisma.$queryRawUnsafe(`SELECT c.nombre,c.id id_criterio,p.numero,n.calificacion FROM "tbl_notas_padre" n
       JOIN "tbl_criterios_padre" c ON c.id=n.id_criterio JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo
       WHERE n.id_alumno=$1 ORDER BY c.orden,p.numero`,idAlumno),
-      prisma.$queryRawUnsafe(`SELECT o.tipo,p.numero,c.texto,u.nombres autor FROM "tbl_observaciones_libreta" o
+      prisma.$queryRawUnsafe(`SELECT o.tipo,p.numero,c.texto,u.nombres autor,o.id_asignacion,curso.nombre curso FROM "tbl_observaciones_libreta" o
       JOIN "tbl_catalogo_libreta" c ON c.id=o.id_catalogo JOIN "tbl_periodos_academicos" p ON p.id=o.id_periodo
-      JOIN "tbl_usuarios" u ON u.id=o.creado_por WHERE o.id_alumno=$1 ORDER BY p.numero,o.tipo`,idAlumno),
+      JOIN "tbl_usuarios" u ON u.id=o.creado_por
+      LEFT JOIN "tbl_asignaciones_academicas" asignacion ON asignacion.id=o.id_asignacion
+      LEFT JOIN "tbl_cursos_academicos" curso ON curso.id=asignacion.id_curso
+      WHERE o.id_alumno=$1 ORDER BY p.numero,o.tipo`,idAlumno),
       prisma.$queryRawUnsafe(`SELECT nombre FROM "tbl_criterios_conducta" WHERE activo=TRUE ORDER BY orden,nombre`),
       prisma.$queryRawUnsafe(`SELECT id,nombre FROM "tbl_criterios_padre" WHERE activo=TRUE ORDER BY orden,nombre`),
     ]);
