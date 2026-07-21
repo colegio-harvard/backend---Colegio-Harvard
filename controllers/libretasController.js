@@ -9,6 +9,37 @@ const FRASE_INSTITUCIONAL_DEFAULT = '24 años formando generaciones, más de 280
 
 const anioActivo = () => prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
 
+// Un docente o tutor vinculado a Secundaria puede trabajar con todas las
+// asignaciones de ese nivel, sin abrirle acceso a Inicial ni Primaria.
+const tieneAccesoSecundaria = async (req, idAnioEscolar = null) => {
+  if (esSuper(req)) return true;
+  if (!['DOCENTE', 'TUTOR'].includes(req.user.rol_codigo)) return false;
+
+  const params = [Number(req.user.id)];
+  const filtroAnio = idAnioEscolar ? 'AND a.id_anio_escolar=$2' : '';
+  if (idAnioEscolar) params.push(Number(idAnioEscolar));
+
+  const rows = await prisma.$queryRawUnsafe(`
+    SELECT 1
+    FROM "tbl_aulas" a
+    JOIN "tbl_grados" g ON g.id=a.id_grado
+    JOIN "tbl_niveles" n ON n.id=g.id_nivel
+    WHERE UPPER(n.nombre) LIKE '%SECUNDARIA%'
+      ${filtroAnio}
+      AND (
+        EXISTS (
+          SELECT 1 FROM "tbl_asignaciones_tutor" t
+          WHERE t.id_aula=a.id AND t.id_usuario_tutor=$1
+        )
+        OR EXISTS (
+          SELECT 1 FROM "tbl_asignaciones_academicas" aa
+          WHERE aa.id_aula=a.id AND aa.id_docente=$1 AND aa.activo=TRUE
+        )
+      )
+    LIMIT 1`, ...params);
+  return Boolean(rows[0]);
+};
+
 const asegurarPeriodos = async (idAnio, userId) => {
   await prisma.$executeRawUnsafe(`
     INSERT INTO "tbl_periodos_academicos" ("id_anio_escolar","numero","nombre","modificado_por")
@@ -26,7 +57,10 @@ const obtenerAsignacion = async (id, req) => {
     WHERE aa.id=$1 AND aa.activo=TRUE`, Number(id));
   const item = rows[0];
   if (!item) return null;
-  if (!esSuper(req) && Number(item.id_docente) !== Number(req.user.id)) return null;
+  if (!esSuper(req) && Number(item.id_docente) !== Number(req.user.id)) {
+    const esSecundaria = String(item.nivel || '').toUpperCase().includes('SECUNDARIA');
+    if (!esSecundaria || !(await tieneAccesoSecundaria(req, item.id_anio_escolar))) return null;
+  }
   return item;
 };
 
@@ -35,7 +69,12 @@ const bootstrap = async (req, res) => {
     const anio = await anioActivo();
     if (!anio) return res.status(400).json({ error: 'No hay año escolar activo' });
     await asegurarPeriodos(anio.id, req.user.id);
-    const filtroDocente = esSuper(req) ? '' : 'AND aa.id_docente=$2';
+    const accesoSecundaria = await tieneAccesoSecundaria(req, anio.id);
+    const filtroDocente = esSuper(req)
+      ? ''
+      : accesoSecundaria
+        ? `AND (aa.id_docente=$2 OR UPPER(n.nombre) LIKE '%SECUNDARIA%')`
+        : 'AND aa.id_docente=$2';
     const params = esSuper(req) ? [anio.id] : [anio.id, req.user.id];
     const [areas, cursos, periodos, catalogo, criterios, criteriosPadre, asignaciones] = await Promise.all([
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_areas_academicas" WHERE activo=TRUE ORDER BY orden,nombre'),
