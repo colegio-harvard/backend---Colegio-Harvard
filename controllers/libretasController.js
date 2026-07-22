@@ -397,8 +397,9 @@ const guardarCatalogo = async (req, res) => {
     const tipo = String(req.body.tipo || '');
     const texto = String(req.body.texto || '').trim();
     if (!['COMENTARIO_DOCENTE','COMENTARIO_TUTOR','NOTA_PADRE'].includes(tipo) || !texto) return res.status(400).json({ error: 'Tipo y texto son obligatorios' });
-    const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_catalogo_libreta" (tipo,categoria,texto,orden,creado_por)
-      VALUES ($1,$2,$3,$4,$5) RETURNING *`, tipo, String(req.body.categoria || '').trim() || null, texto, Number(req.body.orden || 0), req.user.id);
+    const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_catalogo_libreta" (tipo,categoria,subcategoria,texto,orden,creado_por)
+      VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, tipo, String(req.body.categoria || '').trim() || null,
+      String(req.body.subcategoria || '').trim() || null, texto, Number(req.body.orden || 0), req.user.id);
     res.status(201).json({ data: rows[0] });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar la opciÃ³n' }); }
 };
