@@ -11,6 +11,7 @@ router.get('/bootstrap', accesoAcademico, ctrl.bootstrap);
 router.get('/notas', accesoAcademico, ctrl.obtenerNotas);
 router.post('/notas', accesoAcademico, ctrl.guardarNotas);
 router.post('/comentarios-docente', accesoAcademico, ctrl.guardarComentarioDocente);
+router.get('/acompanamiento/:id', verificarRol('SUPER_ADMIN', 'TUTOR'), ctrl.obtenerAcompanamiento);
 router.post('/acompanamiento', verificarRol('SUPER_ADMIN', 'TUTOR'), ctrl.guardarAcompanamiento);
 router.put('/frase-institucional', verificarRol('SUPER_ADMIN'), ctrl.guardarFraseInstitucional);
 

@@ -313,6 +313,50 @@ const guardarAcompanamiento = async (req, res) => {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el acompañamiento' }); }
 };
 
+const obtenerAcompanamiento = async (req, res) => {
+  try {
+    const idAlumno = Number(req.params.id);
+    const idPeriodo = Number(req.query.id_periodo);
+    if (!idAlumno || !idPeriodo) return res.status(400).json({ error: 'Alumno y bimestre son obligatorios' });
+
+    const aulaTutor = await prisma.$queryRawUnsafe(`SELECT al.id_aula
+      FROM "tbl_alumnos" al
+      JOIN "tbl_asignaciones_tutor" t ON t.id_aula=al.id_aula
+      WHERE al.id=$1 AND t.id_usuario_tutor=$2`, idAlumno, req.user.id);
+    if (!esSuper(req) && !aulaTutor[0]) {
+      return res.status(403).json({ error: 'Solo el tutor del aula puede consultar este apartado' });
+    }
+
+    const periodoValido = await prisma.$queryRawUnsafe(`SELECT p.id
+      FROM "tbl_periodos_academicos" p
+      JOIN "tbl_aulas" a ON a.id_anio_escolar=p.id_anio_escolar
+      JOIN "tbl_alumnos" al ON al.id_aula=a.id
+      WHERE p.id=$1 AND al.id=$2`, idPeriodo, idAlumno);
+    if (!periodoValido[0]) return res.status(400).json({ error: 'Bimestre inválido para el alumno' });
+
+    const filtroAutor = esSuper(req) ? '' : 'AND o.creado_por=$3';
+    const paramsObservaciones = esSuper(req)
+      ? [idAlumno, idPeriodo]
+      : [idAlumno, idPeriodo, Number(req.user.id)];
+    const [conducta, notasPadre, observaciones] = await Promise.all([
+      prisma.$queryRawUnsafe(`SELECT id_criterio,calificacion
+        FROM "tbl_notas_conducta" WHERE id_alumno=$1 AND id_periodo=$2`, idAlumno, idPeriodo),
+      prisma.$queryRawUnsafe(`SELECT id_criterio,calificacion
+        FROM "tbl_notas_padre" WHERE id_alumno=$1 AND id_periodo=$2`, idAlumno, idPeriodo),
+      prisma.$queryRawUnsafe(`SELECT o.tipo,o.id_catalogo,o.creado_por,o.creado_en
+        FROM "tbl_observaciones_libreta" o
+        WHERE o.id_alumno=$1 AND o.id_periodo=$2
+          AND o.tipo IN ('COMENTARIO_TUTOR','NOTA_PADRE') ${filtroAutor}
+        ORDER BY o.creado_en DESC`, ...paramsObservaciones),
+    ]);
+
+    res.json({ data: { conducta, notasPadre, observaciones } });
+  } catch (error) {
+    console.error('Error al cargar acompañamiento:', error);
+    res.status(500).json({ error: 'No se pudo cargar la conducta y tutoría' });
+  }
+};
+
 const guardarComentarioDocente = async (req, res) => {
   try {
     const idAsignacion = Number(req.body.id_asignacion);
@@ -443,4 +487,4 @@ const libreta = async (req, res) => {
   } catch(error){console.error(error);res.status(500).json({error:'No se pudo generar la libreta'});}
 };
 
-module.exports={bootstrap,crearArea,actualizarArea,eliminarArea,crearCurso,actualizarCurso,eliminarCurso,asignarCurso,cambiarPeriodo,obtenerNotas,guardarNotas,guardarComentarioDocente,guardarAcompanamiento,guardarFraseInstitucional,guardarCatalogo,cambiarCatalogo,auditoriaNotas,merito,libreta};
+module.exports={bootstrap,crearArea,actualizarArea,eliminarArea,crearCurso,actualizarCurso,eliminarCurso,asignarCurso,cambiarPeriodo,obtenerNotas,guardarNotas,guardarComentarioDocente,obtenerAcompanamiento,guardarAcompanamiento,guardarFraseInstitucional,guardarCatalogo,cambiarCatalogo,auditoriaNotas,merito,libreta};
