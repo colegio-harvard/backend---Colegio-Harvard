@@ -1059,7 +1059,7 @@ const listarTickets = async (req, res) => {
 const cuadricula = async (req, res) => {
   const { id_aula, id_grado, id_nivel } = req.query;
   try {
-    const where = { estado: 'ACTIVO' };
+    const where = { estado: { in: ['ACTIVO', 'RETIRADO'] } };
     if (id_aula) {
       where.id_aula = parseInt(id_aula);
     } else if (id_grado) {
@@ -1142,7 +1142,7 @@ const exportarReportePagosExcel = async (req, res) => {
     }
 
     const alumnos = await prisma.tbl_alumnos.findMany({
-      where: { estado: 'ACTIVO' },
+      where: { estado: { in: ['ACTIVO', 'RETIRADO'] } },
       include: {
         tbl_aulas: { include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } } },
         tbl_padres_alumnos: { include: { tbl_padres: { select: { nombre_completo: true, dni: true, celular: true } } } },
@@ -1234,7 +1234,7 @@ const exportarDeudoresConceptoExcel = async (req, res) => {
     const conceptoSeleccionado = conceptos.find(c => c.clave === concepto);
     if (!conceptoSeleccionado) return res.status(404).json({ error: 'Concepto no encontrado en la plantilla' });
 
-    const where = { estado: 'ACTIVO' };
+    const where = { estado: { in: ['ACTIVO', 'RETIRADO'] } };
     if (id_aula) {
       where.id_aula = parseInt(id_aula);
     } else if (id_grado) {
@@ -1342,7 +1342,7 @@ const dashboardPensiones = async (_req, res) => {
 
     const conceptos = normalizarMesesPlantilla(plantilla.meses_json);
     const alumnos = await prisma.tbl_alumnos.findMany({
-      where: { estado: 'ACTIVO' },
+      where: { estado: { in: ['ACTIVO', 'RETIRADO'] } },
       include: {
         tbl_aulas: { include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } } },
         tbl_padres_alumnos: { include: { tbl_padres: { select: { nombre_completo: true, celular: true } } } },

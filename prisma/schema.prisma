@@ -245,6 +245,11 @@ model tbl_alumnos {
   monto_materiales       Decimal?                 @db.Decimal(10, 2)
   monto_pension          Decimal?                 @db.Decimal(10, 2)
   estado                 String                   @default("ACTIVO") @db.VarChar(20)
+  fecha_retiro           DateTime?                @db.Date
+  ultima_clave_cobro     String?                  @db.VarChar(20)
+  motivo_retiro          String?                  @db.VarChar(100)
+  observacion_retiro     String?                  @db.VarChar(500)
+  retirado_por           Int?
   id_aula                Int
   user_id_registration   Int?
   date_time_registration DateTime?                @default(now()) @db.Timestamptz(6)
