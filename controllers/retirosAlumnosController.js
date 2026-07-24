@@ -43,7 +43,10 @@ const obtenerInfoRetiro = async (req, res) => {
     if (ctx.error) return res.status(ctx.error[0]).json({ error: ctx.error[1] });
     const conceptos = ctx.conceptos.map((concepto, indice) => {
       const estado = ctx.mapa.get(concepto.clave);
-      const total = Number(estado?.monto_total ?? monto(ctx.alumno, concepto));
+      const montoActual = monto(ctx.alumno, concepto);
+      const total = ['PENDIENTE', 'PAGO_PARCIAL'].includes(estado?.estado || 'PENDIENTE')
+        ? montoActual
+        : Number(estado?.monto_total ?? montoActual);
       const pagado = Number(estado?.monto_pagado || 0);
       return {
         ...concepto, indice, estado: estado?.estado || 'PENDIENTE',
@@ -99,7 +102,7 @@ const retirar = async (req, res) => {
         await tx.tbl_estado_pension.upsert({
           where: { id_alumno_clave_mes: { id_alumno: id, clave_mes: concepto.clave } },
           update: {
-            estado: 'NO_CORRESPONDE', monto_total: null, monto_pagado: 0,
+            id_plantilla: ctx.plantilla.id, estado: 'NO_CORRESPONDE', monto_total: null, monto_pagado: 0,
             observacion_no_corresponde: detalle, actualizado_por: req.user.id,
             user_id_modification: req.user.id, date_time_modification: new Date(),
           },
