@@ -234,7 +234,11 @@ const obtenerNotas = async (req, res) => {
     ))`;
     const params = esSuper(req) ? [asignacion.id_aula, Number(req.query.id_periodo)] : [asignacion.id_aula, Number(req.query.id_periodo), req.user.id];
     const alumnos = await prisma.$queryRawUnsafe(`SELECT al.id,al.codigo_alumno,al.nombre_completo,al.foto_url,
-      n.id id_nota,n.calificacion,n.nota_numerica,n.creado_por,n.modificado_por,n.modificado_en
+      n.id id_nota,n.calificacion,n.nota_numerica,n.creado_por,n.modificado_por,n.modificado_en,
+      (SELECT o.id_catalogo FROM "tbl_observaciones_libreta" o
+       WHERE o.id_alumno=al.id AND o.id_periodo=$2 AND o.tipo='COMENTARIO_DOCENTE'
+         AND o.id_asignacion=${Number(asignacion.id)}
+       ORDER BY o.creado_en DESC,o.id DESC LIMIT 1) id_comentario_curso
       FROM "tbl_alumnos" al LEFT JOIN "tbl_notas_academicas" n ON n.id_alumno=al.id
         AND n.id_asignacion=${Number(asignacion.id)} AND n.id_periodo=$2 ${filtroAutor}
       WHERE al.id_aula=$1 AND al.estado='ACTIVO' ORDER BY al.nombre_completo`, ...params);
@@ -307,7 +311,8 @@ const guardarAcompanamiento = async (req, res) => {
         ON CONFLICT (id_alumno,id_periodo,id_criterio) DO UPDATE SET calificacion=EXCLUDED.calificacion,creado_por=$5,modificado_en=NOW()`, Number(id_alumno), Number(id_periodo), Number(c.id_criterio), c.calificacion, req.user.id);
       for (const o of observaciones) await tx.$executeRawUnsafe(`INSERT INTO "tbl_observaciones_libreta"
         (id_alumno,id_periodo,tipo,id_catalogo,creado_por) VALUES ($1,$2,$3,$4,$5)
-        ON CONFLICT (id_alumno,id_periodo,tipo,creado_por) DO UPDATE SET id_catalogo=EXCLUDED.id_catalogo,creado_en=NOW()`, Number(id_alumno), Number(id_periodo), o.tipo, Number(o.id_catalogo), req.user.id);
+        ON CONFLICT (id_alumno,id_periodo,tipo,creado_por) WHERE tipo <> 'COMENTARIO_DOCENTE'
+        DO UPDATE SET id_catalogo=EXCLUDED.id_catalogo,creado_en=NOW()`, Number(id_alumno), Number(id_periodo), o.tipo, Number(o.id_catalogo), req.user.id);
     });
     res.json({ mensaje: 'Conducta y comentarios guardados' });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el acompañamiento' }); }
@@ -372,7 +377,8 @@ const guardarComentarioDocente = async (req, res) => {
     if (!alumno[0] || !catalogo[0]) return res.status(400).json({ error: 'Alumno o comentario invÃ¡lido' });
     await prisma.$executeRawUnsafe(`INSERT INTO "tbl_observaciones_libreta"
       (id_alumno,id_periodo,tipo,id_catalogo,id_asignacion,creado_por) VALUES ($1,$2,'COMENTARIO_DOCENTE',$3,$4,$5)
-      ON CONFLICT (id_alumno,id_periodo,tipo,creado_por) DO UPDATE SET id_catalogo=EXCLUDED.id_catalogo,id_asignacion=EXCLUDED.id_asignacion,creado_en=NOW()`,
+      ON CONFLICT (id_alumno,id_periodo,tipo,id_asignacion) WHERE tipo = 'COMENTARIO_DOCENTE'
+      DO UPDATE SET id_catalogo=EXCLUDED.id_catalogo,creado_por=EXCLUDED.creado_por,creado_en=NOW()`,
       idAlumno, idPeriodo, idCatalogo, idAsignacion, req.user.id);
     res.json({ mensaje: 'Comentario guardado' });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el comentario' }); }
