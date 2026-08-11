@@ -8,6 +8,7 @@ const accesoAcademico = verificarRol('SUPER_ADMIN', 'TUTOR', 'DOCENTE');
 
 router.use(verificarToken);
 router.get('/bootstrap', accesoAcademico, ctrl.bootstrap);
+router.get('/alumnos/buscar', accesoAcademico, ctrl.buscarAlumnos);
 router.get('/notas', accesoAcademico, ctrl.obtenerNotas);
 router.post('/notas', accesoAcademico, ctrl.guardarNotas);
 router.post('/comentarios-docente', accesoAcademico, ctrl.guardarComentarioDocente);

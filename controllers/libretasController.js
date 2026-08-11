@@ -246,6 +246,52 @@ const obtenerNotas = async (req, res) => {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron cargar las notas' }); }
 };
 
+const buscarAlumnos = async (req, res) => {
+  try {
+    const termino = String(req.query.q || '')
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    if (termino.length < 2) return res.json({ data: [] });
+
+    const anio = await anioActivo();
+    if (!anio) return res.status(400).json({ error: 'No hay año escolar activo' });
+    const accesoSecundaria = await tieneAccesoSecundaria(req, anio.id);
+    const filtroAcceso = esSuper(req)
+      ? ''
+      : accesoSecundaria
+        ? `AND (aa.id_docente=$3 OR UPPER(n.nombre) LIKE '%SECUNDARIA%')`
+        : 'AND aa.id_docente=$3';
+    const params = esSuper(req)
+      ? [anio.id, `%${termino}%`]
+      : [anio.id, `%${termino}%`, Number(req.user.id)];
+
+    const alumnos = await prisma.$queryRawUnsafe(`
+      SELECT DISTINCT al.id,al.codigo_alumno,al.nombre_completo,al.id_aula,
+        g.nombre grado,a.seccion,n.nombre nivel
+      FROM "tbl_alumnos" al
+      JOIN "tbl_aulas" a ON a.id=al.id_aula
+      JOIN "tbl_grados" g ON g.id=a.id_grado
+      JOIN "tbl_niveles" n ON n.id=g.id_nivel
+      JOIN "tbl_asignaciones_academicas" aa ON aa.id_aula=a.id
+        AND aa.id_anio_escolar=$1 AND aa.activo=TRUE
+      WHERE a.id_anio_escolar=$1 AND al.estado='ACTIVO'
+        ${filtroAcceso}
+        AND (
+          LOWER(al.codigo_alumno) LIKE $2
+          OR LOWER(TRANSLATE(al.nombre_completo,
+            'ÁÉÍÓÚÜÑáéíóúüñ','AEIOUUNaeiouun')) LIKE $2
+        )
+      ORDER BY al.nombre_completo
+      LIMIT 20`, ...params);
+    res.json({ data: alumnos });
+  } catch (error) {
+    console.error('Error buscando alumnos en libretas:', error);
+    res.status(500).json({ error: 'No se pudo realizar la búsqueda de alumnos' });
+  }
+};
+
 const guardarNotas = async (req, res) => {
   try {
     const idAsignacion = Number(req.body.id_asignacion);
@@ -494,4 +540,4 @@ const libreta = async (req, res) => {
   } catch(error){console.error(error);res.status(500).json({error:'No se pudo generar la libreta'});}
 };
 
-module.exports={bootstrap,crearArea,actualizarArea,eliminarArea,crearCurso,actualizarCurso,eliminarCurso,asignarCurso,cambiarPeriodo,obtenerNotas,guardarNotas,guardarComentarioDocente,obtenerAcompanamiento,guardarAcompanamiento,guardarFraseInstitucional,guardarCatalogo,cambiarCatalogo,auditoriaNotas,merito,libreta};
+module.exports={bootstrap,crearArea,actualizarArea,eliminarArea,crearCurso,actualizarCurso,eliminarCurso,asignarCurso,cambiarPeriodo,buscarAlumnos,obtenerNotas,guardarNotas,guardarComentarioDocente,obtenerAcompanamiento,guardarAcompanamiento,guardarFraseInstitucional,guardarCatalogo,cambiarCatalogo,auditoriaNotas,merito,libreta};
