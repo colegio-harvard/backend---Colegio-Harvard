@@ -9,6 +9,22 @@ const FRASE_INSTITUCIONAL_DEFAULT = '24 años formando generaciones, más de 280
 
 const anioActivo = () => prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
 
+const guardarComentarioCurso = async (db, { idAlumno, idPeriodo, idCatalogo, idAsignacion, idUsuario }) => {
+  const actualizados = await db.$executeRawUnsafe(`UPDATE "tbl_observaciones_libreta"
+    SET id_catalogo=$1,creado_por=$2,creado_en=NOW()
+    WHERE id_alumno=$3 AND id_periodo=$4 AND tipo='COMENTARIO_DOCENTE'
+      AND id_asignacion=$5 AND id_catalogo IS DISTINCT FROM $1`,
+    idCatalogo, idUsuario, idAlumno, idPeriodo, idAsignacion);
+  if (actualizados) return;
+  const existente = await db.$queryRawUnsafe(`SELECT id FROM "tbl_observaciones_libreta"
+    WHERE id_alumno=$1 AND id_periodo=$2 AND tipo='COMENTARIO_DOCENTE' AND id_asignacion=$3
+    LIMIT 1`, idAlumno, idPeriodo, idAsignacion);
+  if (!existente[0]) await db.$executeRawUnsafe(`INSERT INTO "tbl_observaciones_libreta"
+    (id_alumno,id_periodo,tipo,id_catalogo,id_asignacion,creado_por)
+    VALUES ($1,$2,'COMENTARIO_DOCENTE',$3,$4,$5)`,
+    idAlumno, idPeriodo, idCatalogo, idAsignacion, idUsuario);
+};
+
 // Un docente o tutor vinculado a Secundaria puede trabajar con todas las
 // asignaciones de ese nivel, sin abrirle acceso a Inicial ni Primaria.
 const tieneAccesoSecundaria = async (req, idAnioEscolar = null) => {
@@ -335,20 +351,13 @@ const guardarNotas = async (req, res) => {
       for (const item of comentarios) {
         const idAlumno = Number(item.id_alumno);
         const idCatalogo = Number(item.id_catalogo);
-        const [alumno, catalogo] = await Promise.all([
-          tx.$queryRawUnsafe('SELECT id FROM "tbl_alumnos" WHERE id=$1 AND id_aula=$2', idAlumno, Number(asignacion.id_aula)),
-          tx.$queryRawUnsafe(`SELECT id FROM "tbl_catalogo_libreta" WHERE id=$1 AND tipo='COMENTARIO_DOCENTE' AND activo=TRUE`, idCatalogo),
-        ]);
+        const alumno = await tx.$queryRawUnsafe('SELECT id FROM "tbl_alumnos" WHERE id=$1 AND id_aula=$2', idAlumno, Number(asignacion.id_aula));
+        const catalogo = await tx.$queryRawUnsafe(`SELECT id FROM "tbl_catalogo_libreta" WHERE id=$1 AND tipo='COMENTARIO_DOCENTE' AND activo=TRUE`, idCatalogo);
         if (!alumno[0]) throw new Error('ALUMNO_NO_AUTORIZADO');
         if (!catalogo[0]) throw new Error('COMENTARIO_INVALIDO');
-        await tx.$executeRawUnsafe(`INSERT INTO "tbl_observaciones_libreta"
-          (id_alumno,id_periodo,tipo,id_catalogo,id_asignacion,creado_por) VALUES ($1,$2,'COMENTARIO_DOCENTE',$3,$4,$5)
-          ON CONFLICT (id_alumno,id_periodo,tipo,id_asignacion) WHERE tipo = 'COMENTARIO_DOCENTE'
-          DO UPDATE SET id_catalogo=EXCLUDED.id_catalogo,creado_por=EXCLUDED.creado_por,creado_en=NOW()
-          WHERE "tbl_observaciones_libreta".id_catalogo IS DISTINCT FROM EXCLUDED.id_catalogo`,
-          idAlumno, idPeriodo, idCatalogo, idAsignacion, req.user.id);
+        await guardarComentarioCurso(tx, { idAlumno, idPeriodo, idCatalogo, idAsignacion, idUsuario: req.user.id });
       }
-    });
+    }, { maxWait: 5000, timeout: 30000 });
     res.json({ mensaje: comentarios.length ? 'Notas y comentarios guardados correctamente' : 'Notas guardadas correctamente' });
   } catch (error) {
     if (error.message === 'MOTIVO_REQUERIDO') return res.status(400).json({ error: 'El Superadministrador debe indicar el motivo de la modificación' });
@@ -439,12 +448,7 @@ const guardarComentarioDocente = async (req, res) => {
     const alumno = await prisma.$queryRawUnsafe('SELECT id FROM "tbl_alumnos" WHERE id=$1 AND id_aula=$2', idAlumno, Number(asignacion.id_aula));
     const catalogo = await prisma.$queryRawUnsafe(`SELECT id FROM "tbl_catalogo_libreta" WHERE id=$1 AND tipo='COMENTARIO_DOCENTE' AND activo=TRUE`, idCatalogo);
     if (!alumno[0] || !catalogo[0]) return res.status(400).json({ error: 'Alumno o comentario invÃ¡lido' });
-    await prisma.$executeRawUnsafe(`INSERT INTO "tbl_observaciones_libreta"
-      (id_alumno,id_periodo,tipo,id_catalogo,id_asignacion,creado_por) VALUES ($1,$2,'COMENTARIO_DOCENTE',$3,$4,$5)
-      ON CONFLICT (id_alumno,id_periodo,tipo,id_asignacion) WHERE tipo = 'COMENTARIO_DOCENTE'
-      DO UPDATE SET id_catalogo=EXCLUDED.id_catalogo,creado_por=EXCLUDED.creado_por,creado_en=NOW()
-      WHERE "tbl_observaciones_libreta".id_catalogo IS DISTINCT FROM EXCLUDED.id_catalogo`,
-      idAlumno, idPeriodo, idCatalogo, idAsignacion, req.user.id);
+    await guardarComentarioCurso(prisma, { idAlumno, idPeriodo, idCatalogo, idAsignacion, idUsuario: req.user.id });
     res.json({ mensaje: 'Comentario guardado' });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el comentario' }); }
 };
