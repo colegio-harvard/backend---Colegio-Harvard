@@ -302,6 +302,7 @@ const guardarNotas = async (req, res) => {
     if (!periodo) return res.status(400).json({ error: 'Periodo inválido' });
     if (!esSuper(req) && periodo.estado !== 'ABIERTO') return res.status(409).json({ error: 'El bimestre no está abierto' });
     const notas = Array.isArray(req.body.notas) ? req.body.notas : [];
+    const comentarios = Array.isArray(req.body.comentarios) ? req.body.comentarios : [];
     const nivelAsignacion = String(asignacion.nivel || '').toUpperCase();
     const esNumerica = nivelAsignacion.includes('PRIMARIA') || nivelAsignacion.includes('SECUNDARIA');
     if (esNumerica && notas.some(n => !notaNumericaValida(n.nota_numerica))) return res.status(400).json({ error: 'Las notas numéricas deben estar entre 00 y 20' });
@@ -331,11 +332,28 @@ const guardarNotas = async (req, res) => {
             VALUES ($1,$2,$3,$4,$5,$6,$7)`, rows[0].id, anterior[0]?.calificacion || null, calificacion, anterior[0]?.nota_numerica ?? null, notaNumerica, String(req.body.motivo || '').trim() || null, req.user.id);
         }
       }
+      for (const item of comentarios) {
+        const idAlumno = Number(item.id_alumno);
+        const idCatalogo = Number(item.id_catalogo);
+        const [alumno, catalogo] = await Promise.all([
+          tx.$queryRawUnsafe('SELECT id FROM "tbl_alumnos" WHERE id=$1 AND id_aula=$2', idAlumno, Number(asignacion.id_aula)),
+          tx.$queryRawUnsafe(`SELECT id FROM "tbl_catalogo_libreta" WHERE id=$1 AND tipo='COMENTARIO_DOCENTE' AND activo=TRUE`, idCatalogo),
+        ]);
+        if (!alumno[0]) throw new Error('ALUMNO_NO_AUTORIZADO');
+        if (!catalogo[0]) throw new Error('COMENTARIO_INVALIDO');
+        await tx.$executeRawUnsafe(`INSERT INTO "tbl_observaciones_libreta"
+          (id_alumno,id_periodo,tipo,id_catalogo,id_asignacion,creado_por) VALUES ($1,$2,'COMENTARIO_DOCENTE',$3,$4,$5)
+          ON CONFLICT (id_alumno,id_periodo,tipo,id_asignacion) WHERE tipo = 'COMENTARIO_DOCENTE'
+          DO UPDATE SET id_catalogo=EXCLUDED.id_catalogo,creado_por=EXCLUDED.creado_por,creado_en=NOW()
+          WHERE "tbl_observaciones_libreta".id_catalogo IS DISTINCT FROM EXCLUDED.id_catalogo`,
+          idAlumno, idPeriodo, idCatalogo, idAsignacion, req.user.id);
+      }
     });
-    res.json({ mensaje: 'Notas guardadas correctamente' });
+    res.json({ mensaje: comentarios.length ? 'Notas y comentarios guardados correctamente' : 'Notas guardadas correctamente' });
   } catch (error) {
     if (error.message === 'MOTIVO_REQUERIDO') return res.status(400).json({ error: 'El Superadministrador debe indicar el motivo de la modificación' });
     if (['ALUMNO_NO_AUTORIZADO','NOTA_AJENA'].includes(error.message)) return res.status(403).json({ error: 'No puede modificar esta nota' });
+    if (error.message === 'COMENTARIO_INVALIDO') return res.status(400).json({ error: 'Uno de los comentarios seleccionados ya no está disponible' });
     console.error(error); res.status(500).json({ error: 'No se pudieron guardar las notas' });
   }
 };
@@ -424,7 +442,8 @@ const guardarComentarioDocente = async (req, res) => {
     await prisma.$executeRawUnsafe(`INSERT INTO "tbl_observaciones_libreta"
       (id_alumno,id_periodo,tipo,id_catalogo,id_asignacion,creado_por) VALUES ($1,$2,'COMENTARIO_DOCENTE',$3,$4,$5)
       ON CONFLICT (id_alumno,id_periodo,tipo,id_asignacion) WHERE tipo = 'COMENTARIO_DOCENTE'
-      DO UPDATE SET id_catalogo=EXCLUDED.id_catalogo,creado_por=EXCLUDED.creado_por,creado_en=NOW()`,
+      DO UPDATE SET id_catalogo=EXCLUDED.id_catalogo,creado_por=EXCLUDED.creado_por,creado_en=NOW()
+      WHERE "tbl_observaciones_libreta".id_catalogo IS DISTINCT FROM EXCLUDED.id_catalogo`,
       idAlumno, idPeriodo, idCatalogo, idAsignacion, req.user.id);
     res.json({ mensaje: 'Comentario guardado' });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el comentario' }); }
