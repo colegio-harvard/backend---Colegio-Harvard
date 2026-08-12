@@ -9,6 +9,7 @@ const {
   montoBaseConceptoAlumno,
   montoTotalVigente,
 } = require('../services/pensiones/calculoConceptos');
+const validacionImportacion = require('../services/pensiones/validacionImportacion');
 
 const generarQrToken = () => {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -25,80 +26,15 @@ const nombreConcepto = (plantilla, claveMes) => {
   return mes?.nombre || claveMes;
 };
 
-const parseMontoExcel = (value) => {
-  if (value === undefined || value === null || value === '') return null;
-  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? Number(value) : null;
-  const limpio = String(value).replace(/[^\d.,-]/g, '').replace(',', '.');
-  if (!limpio) return null;
-  const n = Number(limpio);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-};
-
-const normalizarSeccion = (value) => {
-  const raw = String(value || '').trim();
-  if (!raw) return 'A';
-  return raw.replace(/^SECCI[OÓ]N\s+/i, '').trim().toUpperCase();
-};
-
-const normalizarGradoImportacion = (value) => normalizarTexto(value)
-  .replace(/\bGRADO\b/g, '')
-  .replace(/\bANOS\b/g, 'ANIOS')
-  .replace(/\bAÑOS\b/g, 'ANIOS')
-  .replace(/\bANIO\b/g, 'ANIOS')
-  .replace(/\bAÑO\b/g, 'ANIOS')
-  .replace(/\bPRIMERO\b/g, '1RO')
-  .replace(/\bSEGUNDO\b/g, '2DO')
-  .replace(/\bTERCERO\b/g, '3RO')
-  .replace(/\bCUARTO\b/g, '4TO')
-  .replace(/\bQUINTO\b/g, '5TO')
-  .replace(/\bSEXTO\b/g, '6TO')
-  .replace(/\b1ER\b/g, '1RO')
-  .replace(/\b1ERO\b/g, '1RO')
-  .replace(/\b3ER\b/g, '3RO')
-  .replace(/\s+/g, ' ')
-  .trim();
-
-const aulaKey = (nivel, grado, seccion) => [
-  normalizarTexto(nivel),
-  normalizarGradoImportacion(grado),
-  normalizarSeccion(seccion),
-].join('|');
-
-const obtenerValorPorEncabezado = (row, headerMap, nombres) => {
-  for (const nombre of nombres) {
-    const key = headerMap[normalizarTexto(nombre)];
-    if (key && row[key] !== undefined) return row[key];
-  }
-  return null;
-};
-
-const crearMapaConceptosImportacion = (plantilla) => {
-  const meses = normalizarMesesPlantilla(plantilla?.meses_json);
-  const map = {};
-  const alias = {
-    MATRICULA: ['MATRICULA', 'MATRÍCULA'],
-    MATERIALES: ['MATERIALES', 'MATERIAL'],
-    MAR: ['MARZO'],
-    ABR: ['ABRIL'],
-    MAY: ['MAYO'],
-    JUN: ['JUNIO'],
-    JUL: ['JULIO'],
-    AGO: ['AGOSTO'],
-    SET: ['SETIEMBRE', 'SEPTIEMBRE'],
-    SEP: ['SETIEMBRE', 'SEPTIEMBRE'],
-    OCT: ['OCTUBRE'],
-    NOV: ['NOVIEMBRE'],
-    DIC: ['DICIEMBRE'],
-  };
-
-  for (const mes of meses) {
-    const claves = [mes.clave, mes.nombre, ...(alias[mes.clave] || [])];
-    for (const clave of claves) {
-      map[normalizarTexto(clave)] = mes;
-    }
-  }
-  return map;
-};
+// Fuente única y probada para los formatos que llegan desde Excel.
+const {
+  parseMontoExcel,
+  normalizarSeccion,
+  normalizarGradoImportacion,
+  aulaKey,
+  obtenerValorPorEncabezado,
+  crearMapaConceptosImportacion,
+} = validacionImportacion;
 
 const leerFilasPagosExcel = (buffer) => {
   const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
