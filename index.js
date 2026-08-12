@@ -38,7 +38,7 @@ const libretasRoutes = require('./routes/libretasRoutes');
 // --- Controller para cron ---
 const { ejecutarAlertasNoLlego } = require('./controllers/alertasController');
 const { ejecutarProgramadas } = require('./controllers/notifPersonalizadasController');
-const { ejecutarBackup } = require('./utils/backupService');
+const { ejecutarBackup, getBackupStatus } = require('./utils/backupService');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -109,6 +109,7 @@ app.get('/api/health', async (req, res) => {
       uptime_seconds: Math.floor(process.uptime()),
       response_ms: Date.now() - startedAt,
       request_id: req.requestId,
+      backup: getBackupStatus(),
     });
   } catch (error) {
     console.error(`[HEALTH] ${req.requestId}:`, error.message);

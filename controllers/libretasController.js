@@ -1,10 +1,8 @@
 const prisma = require('../config/prisma');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
+const { notaValida, notaNumericaValida, letraDesdeNumero } = require('../services/libretas/calificaciones');
 
 const esSuper = req => req.user.rol_codigo === 'SUPER_ADMIN';
-const notaValida = value => ['AD', 'A', 'B', 'C'].includes(String(value || '').toUpperCase());
-const notaNumericaValida = value => value !== '' && value !== null && Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 20;
-const letraDesdeNumero = value => Number(value) >= 16 ? 'AD' : Number(value) >= 11 ? 'A' : Number(value) >= 6 ? 'B' : 'C';
 const FRASE_INSTITUCIONAL_DEFAULT = '24 años formando generaciones, más de 2800 estudiantes y miles de historias que nos inspiran a seguir creciendo juntos.';
 
 const anioActivo = () => prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });

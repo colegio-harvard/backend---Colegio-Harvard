@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { evaluarMarcacionRepetida } = require('../services/asistencia/reglaMarcacion');
 const XLSX = require('xlsx');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { emitToUser, emitToAula } = require('../utils/socketEmitter');
@@ -251,9 +252,8 @@ const registrarEvento = async (req, res) => {
     // Protección en servidor: nunca convertir un doble escaneo inmediato en salida.
     const ultimoEvento = eventosHoy[eventosHoy.length - 1];
     if (ultimoEvento?.fecha_hora_evento) {
-      const transcurridoMs = Date.now() - new Date(ultimoEvento.fecha_hora_evento).getTime();
-      if (transcurridoMs >= 0 && transcurridoMs < 5000) {
-        const segundosRestantes = Math.max(1, Math.ceil((5000 - transcurridoMs) / 1000));
+      const { bloqueada, segundosRestantes } = evaluarMarcacionRepetida(ultimoEvento.fecha_hora_evento);
+      if (bloqueada) {
         return res.status(429).json({
           error: `Este mismo QR acaba de registrarse. Espere ${segundosRestantes} segundo${segundosRestantes === 1 ? '' : 's'} para volver a marcar.`,
           codigo: 'QR_REPETIDO',
