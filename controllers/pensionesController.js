@@ -516,7 +516,11 @@ const obtenerPlantilla = async (req, res) => {
 
     const mesesRaw = Array.isArray(plantilla.meses_json) ? plantilla.meses_json : [];
 
-    // Normalizar cualquier formato viejo al nuevo formato { clave, nombre, tipo, comentario }
+    // Normalizar cualquier formato viejo sin perder el monto configurado de
+    // los pagos personalizados. Reportes y formularios usan este valor como
+    // fuente de verdad aun cuando el alumno todavia no tiene un estado creado.
+    const conceptosNormalizados = normalizarMesesPlantilla(mesesRaw);
+    const montoPorClave = new Map(conceptosNormalizados.map(m => [m.clave, m.monto]));
     const seen = new Set();
     const normalized = [];
     for (const m of mesesRaw) {
@@ -541,6 +545,7 @@ const obtenerPlantilla = async (req, res) => {
       nombre: m.nombre,
       tipo: m.tipo,
       comentario: m.comentario || '',
+      monto: montoPorClave.get(m.clave) ?? null,
       id_plantilla: plantilla.id,
     }));
 
