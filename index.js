@@ -6,6 +6,12 @@ const path = require('path');
 const cron = require('node-cron');
 const prisma = require('./config/prisma');
 const { initSocket } = require('./config/socket');
+const {
+  securityHeaders,
+  createRateLimiter,
+  notFoundHandler,
+  errorHandler,
+} = require('./middleware/securityMiddleware');
 
 // --- Rutas ---
 const authRoutes = require('./routes/authRoutes');
@@ -41,6 +47,7 @@ const PORT = process.env.PORT || 4000;
 // LOCAL: NODE_ENV=development (viene del .env local)
 // RAILWAY: NODE_ENV=production (se configura en el dashboard de Railway)
 const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction) app.set('trust proxy', 1);
 
 // --- CORS ---
 // LOCAL: permite cualquier origen para facilitar el desarrollo
@@ -54,12 +61,13 @@ const corsOptions = {
 
 // --- Middleware global ---
 app.use(cors(corsOptions));
+app.use(securityHeaders);
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // --- Registro de rutas ---
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', createRateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyPrefix: 'auth' }), authRoutes);
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/config-escolar', configEscolarRoutes);
 app.use('/api/padres', padresRoutes);
@@ -90,6 +98,31 @@ app.get('/api/ping', async (req, res) => {
     res.status(500).json({ error: 'DB error' });
   }
 });
+
+app.get('/api/health', async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({
+      status: 'ok',
+      database: 'ok',
+      uptime_seconds: Math.floor(process.uptime()),
+      response_ms: Date.now() - startedAt,
+      request_id: req.requestId,
+    });
+  } catch (error) {
+    console.error(`[HEALTH] ${req.requestId}:`, error.message);
+    res.status(503).json({
+      status: 'degraded',
+      database: 'error',
+      response_ms: Date.now() - startedAt,
+      request_id: req.requestId,
+    });
+  }
+});
+
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 // --- Cron: Alertas "no llegó" cada minuto de lunes a viernes 7:00-14:00 ---
 cron.schedule('* 7-13 * * 1-5', async () => {

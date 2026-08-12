@@ -265,6 +265,9 @@ model tbl_alumnos {
   tbl_hilos_mensaje      tbl_hilos_mensaje[]
   tbl_padres_alumnos     tbl_padres_alumnos?
   tbl_reportes_semanales tbl_reportes_semanales[]
+
+  @@index([id_aula, estado], map: "idx_alumnos_aula_estado")
+  @@index([nombre_completo], map: "idx_alumnos_nombre")
 }
 
 model tbl_padres_alumnos {
@@ -339,6 +342,9 @@ model tbl_eventos_asistencia {
   tbl_anios_escolares     tbl_anios_escolares  @relation(fields: [id_anio_escolar], references: [id], onDelete: NoAction)
   tbl_puntos_escaneo      tbl_puntos_escaneo   @relation(fields: [id_punto_escaneo], references: [id], onDelete: NoAction)
   tbl_usuarios            tbl_usuarios         @relation(fields: [registrado_por], references: [id], onDelete: NoAction)
+
+  @@index([id_alumno, fecha_evento, fecha_hora_evento], map: "idx_eventos_alumno_fecha_hora")
+  @@index([id_anio_escolar, fecha_evento], map: "idx_eventos_anio_fecha")
 }
 
 model tbl_asistencia_dia {
@@ -362,6 +368,7 @@ model tbl_asistencia_dia {
   tbl_correcciones_asistencia tbl_correcciones_asistencia[]
 
   @@unique([id_alumno, fecha], map: "uq_alumno_fecha")
+  @@index([id_anio_escolar, fecha, estado], map: "idx_asistencia_anio_fecha_estado")
 }
 
 model tbl_correcciones_asistencia {
@@ -632,6 +639,7 @@ model tbl_estado_pension {
   tbl_pagos_pension      tbl_pagos_pension[]
 
   @@unique([id_alumno, clave_mes], map: "uq_alumno_mes")
+  @@index([id_plantilla, estado, clave_mes], map: "idx_estado_pension_plantilla_estado_clave")
 }
 
 model tbl_pagos_pension {
@@ -648,6 +656,9 @@ model tbl_pagos_pension {
   date_time_registration DateTime?          @default(now()) @db.Timestamptz(6)
   tbl_estado_pension     tbl_estado_pension @relation(fields: [id_estado_pension], references: [id], onDelete: Cascade)
   tbl_usuarios           tbl_usuarios       @relation(fields: [registrado_por], references: [id], onDelete: NoAction)
+
+  @@index([id_estado_pension, fecha_pago], map: "idx_pagos_estado_fecha")
+  @@index([fecha_pago], map: "idx_pagos_fecha")
 }
 
 model tbl_auditoria {
@@ -660,6 +671,10 @@ model tbl_auditoria {
   resumen          String
   meta_json        Json?
   tbl_usuarios     tbl_usuarios @relation(fields: [id_usuario_actor], references: [id], onDelete: NoAction)
+
+  @@index([marca_tiempo], map: "idx_auditoria_fecha")
+  @@index([id_usuario_actor, marca_tiempo], map: "idx_auditoria_usuario_fecha")
+  @@index([codigo_accion, marca_tiempo], map: "idx_auditoria_accion_fecha")
 }
 
 model tbl_notificaciones_personalizadas {

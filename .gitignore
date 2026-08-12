@@ -27,4 +27,8 @@ dist-ssr
 *.sln
 *.sw?
 
+# Test and quality artifacts
+coverage
+.nyc_output
+
 scripts

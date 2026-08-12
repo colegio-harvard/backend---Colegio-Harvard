@@ -3,6 +3,12 @@ const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { todayLima } = require('../utils/dateUtils');
 const crypto = require('crypto');
 const XLSX = require('xlsx');
+const {
+  normalizarTexto,
+  normalizarMesesPlantilla,
+  montoBaseConceptoAlumno,
+  montoTotalVigente,
+} = require('../services/pensiones/calculoConceptos');
 
 const generarQrToken = () => {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -14,65 +20,10 @@ const formatFechaIso = (fecha) => {
   return new Date(fecha).toISOString().split('T')[0];
 };
 
-const normalizarMesesPlantilla = (mesesRaw) => {
-  const meses = Array.isArray(mesesRaw) ? mesesRaw : [];
-  return meses.map(m => {
-    const clave = m.clave || m.clave_mes || m.mes || '';
-    const nombre = m.nombre || m.label || clave;
-    const tipo = m.tipo || 'mes';
-    let monto = m.monto !== undefined && m.monto !== null && m.monto !== '' ? Number(m.monto) : null;
-    // Compatibilidad con los dos adicionales creados antes de existir el campo monto.
-    if (tipo === 'personalizado' && monto === null
-        && ['ADICIONAL JULIO', 'ADICIONAL DICIEMBRE'].includes(normalizarTexto(nombre))) {
-      monto = 50;
-    }
-    return { clave, nombre, tipo, comentario: m.comentario || '', monto };
-  }).filter(m => m.clave);
-};
-
 const nombreConcepto = (plantilla, claveMes) => {
   const mes = normalizarMesesPlantilla(plantilla?.meses_json).find(m => m.clave === claveMes);
   return mes?.nombre || claveMes;
 };
-
-const montoBaseConceptoAlumno = (alumno, claveMes, montoPersonalizado = null) => {
-  const clave = normalizarTexto(claveMes);
-  if (clave.includes('MATRICULA')) return alumno.monto_matricula;
-  if (clave.includes('MATERIAL')) {
-    if (alumno.monto_materiales === null || alumno.monto_materiales === undefined) return null;
-    return Math.min(Number(alumno.monto_materiales), 150);
-  }
-  if (montoPersonalizado !== null && montoPersonalizado !== undefined && Number.isFinite(Number(montoPersonalizado))) {
-    return Number(montoPersonalizado);
-  }
-  return alumno.monto_pension;
-};
-
-// Los estados pendientes pueden conservar un monto_total antiguo (por ejemplo,
-// si la tarifa del alumno se corrigio despues de crear la cuadricula). Mientras
-// la deuda siga abierta, la fuente de verdad es la tarifa vigente del alumno.
-const montoTotalVigente = (alumno, concepto, estado) => {
-  const estadoTexto = estado?.estado || 'PENDIENTE';
-  const descriptor = typeof concepto === 'object'
-    ? `${concepto.clave || ''} ${concepto.nombre || ''}`
-    : concepto;
-  const montoPersonalizado = typeof concepto === 'object' && concepto.tipo === 'personalizado'
-    ? concepto.monto
-    : null;
-  const montoActual = montoBaseConceptoAlumno(alumno, descriptor, montoPersonalizado);
-  if (['PENDIENTE', 'PAGO_PARCIAL'].includes(estadoTexto)
-      && montoActual !== null && montoActual !== undefined) {
-    return Number(montoActual);
-  }
-  return Number(estado?.monto_total ?? montoActual ?? 0);
-};
-
-const normalizarTexto = (value) => String(value || '')
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .replace(/\s+/g, ' ')
-  .trim()
-  .toUpperCase();
 
 const parseMontoExcel = (value) => {
   if (value === undefined || value === null || value === '') return null;
