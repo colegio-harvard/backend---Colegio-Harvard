@@ -12,6 +12,7 @@ const {
   notFoundHandler,
   errorHandler,
 } = require('./middleware/securityMiddleware');
+const medirPeticiones = require('./middleware/metricasMiddleware');
 
 // --- Rutas ---
 const authRoutes = require('./routes/authRoutes');
@@ -62,6 +63,7 @@ const corsOptions = {
 // --- Middleware global ---
 app.use(cors(corsOptions));
 app.use(securityHeaders);
+app.use(medirPeticiones);
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
