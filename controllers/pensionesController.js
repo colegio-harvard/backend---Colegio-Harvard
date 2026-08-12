@@ -1059,6 +1059,12 @@ const listarTickets = async (req, res) => {
 const cuadricula = async (req, res) => {
   const { id_aula, id_grado, id_nivel } = req.query;
   try {
+    const anioActivo = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
+    const plantilla = anioActivo ? await prisma.tbl_plantilla_pension.findFirst({
+      where: { id_anio_escolar: anioActivo.id },
+    }) : null;
+    const conceptos = normalizarMesesPlantilla(plantilla?.meses_json);
+    const conceptosPorClave = new Map(conceptos.map(concepto => [concepto.clave, concepto]));
     const where = { estado: { in: ['ACTIVO', 'RETIRADO'] } };
     if (id_aula) {
       where.id_aula = parseInt(id_aula);
@@ -1073,7 +1079,7 @@ const cuadricula = async (req, res) => {
       include: {
         tbl_aulas: { include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } } },
         tbl_padres_alumnos: { include: { tbl_padres: { select: { id: true, nombre_completo: true, dni: true } } } },
-        tbl_estado_pension: true,
+        tbl_estado_pension: plantilla ? { where: { id_plantilla: plantilla.id } } : true,
       },
       orderBy: { nombre_completo: 'asc' },
     });
@@ -1100,15 +1106,18 @@ const cuadricula = async (req, res) => {
         nombre_completo: a.tbl_padres_alumnos.tbl_padres.nombre_completo,
         dni: a.tbl_padres_alumnos.tbl_padres.dni,
       } : null,
-      pensiones: (a.tbl_estado_pension || []).map(e => ({
-        id: e.id,
-        clave_mes: e.clave_mes,
-        estado: e.estado,
-        monto_total: e.monto_total ? Number(e.monto_total) : null,
-        monto_pagado: Number(e.monto_pagado),
-        observacion_no_corresponde: e.observacion_no_corresponde || null,
-        id_plantilla: e.id_plantilla,
-      })),
+      pensiones: (a.tbl_estado_pension || []).map(e => {
+        const concepto = conceptosPorClave.get(e.clave_mes) || e.clave_mes;
+        return {
+          id: e.id,
+          clave_mes: e.clave_mes,
+          estado: e.estado,
+          monto_total: montoTotalVigente(a, concepto, e),
+          monto_pagado: Number(e.monto_pagado),
+          observacion_no_corresponde: e.observacion_no_corresponde || null,
+          id_plantilla: e.id_plantilla,
+        };
+      }),
     }));
 
     res.json({ data });
