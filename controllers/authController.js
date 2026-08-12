@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { findUserByUsername, incrementFailedAttempts, resetFailedAttempts, parentHasLink } = require('../models/authModel');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
+const { COOKIE_NAME, sessionCookieOptions } = require('../services/auth/token');
 
 const login = async (req, res) => {
   const { username, contrasena } = req.body;
@@ -111,6 +112,7 @@ const login = async (req, res) => {
       { expiresIn: '8h' }
     );
 
+    res.cookie(COOKIE_NAME, token, sessionCookieOptions(process.env.NODE_ENV === 'production'));
     res.json({
       mensaje: 'Login exitoso',
       token,
@@ -130,4 +132,14 @@ const login = async (req, res) => {
   }
 };
 
-module.exports = { login };
+const logout = (req, res) => {
+  res.clearCookie(COOKIE_NAME, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+  res.json({ mensaje: 'Sesion cerrada' });
+};
+
+module.exports = { login, logout };

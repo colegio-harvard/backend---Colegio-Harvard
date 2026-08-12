@@ -1,6 +1,7 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const prisma = require('./prisma');
+const { extractToken } = require('../services/auth/token');
 
 let io = null;
 
@@ -30,7 +31,12 @@ const initSocket = (httpServer) => {
 
   // Middleware de autenticacion JWT
   io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
+    const token = extractToken({
+      authorization: socket.handshake.auth?.token
+        ? `Bearer ${socket.handshake.auth.token}`
+        : null,
+      cookie: socket.handshake.headers?.cookie,
+    });
     if (!token) return next(new Error('auth_error'));
 
     try {

@@ -109,7 +109,13 @@ app.get('/api/health', async (req, res) => {
       uptime_seconds: Math.floor(process.uptime()),
       response_ms: Date.now() - startedAt,
       request_id: req.requestId,
-      backup: getBackupStatus(),
+      backup: (() => {
+        const backup = getBackupStatus();
+        return {
+          estado: backup.estado,
+          fecha: backup.fecha || null,
+        };
+      })(),
     });
   } catch (error) {
     console.error(`[HEALTH] ${req.requestId}:`, error.message);
