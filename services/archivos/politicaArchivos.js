@@ -13,6 +13,8 @@ const TIPOS_PERMITIDOS = Object.freeze({
   '.pdf': new Set(['application/pdf']),
 });
 
+const TIPO_GENERICO_ALMACENAMIENTO = 'application/octet-stream';
+
 const normalizarExtension = (nombre = '') => path.extname(String(nombre)).toLowerCase();
 
 const esCombinacionArchivoPermitida = (nombre, mimetype, extensionesPermitidas) => {
@@ -46,10 +48,23 @@ const sanitizarNombreDescarga = (nombre = 'archivo') => {
 
 const esContenidoAlmacenadoPermitido = (clave, mimetype) => {
   const prefijo = Object.keys(PREFIJOS_PERMITIDOS).find(item => String(clave).startsWith(item));
+  const tipoNormalizado = String(mimetype || '').toLowerCase().trim();
   return Boolean(
     prefijo
-    && esCombinacionArchivoPermitida(clave, mimetype, PREFIJOS_PERMITIDOS[prefijo]),
+    && (
+      esCombinacionArchivoPermitida(clave, tipoNormalizado, PREFIJOS_PERMITIDOS[prefijo])
+      // Algunos objetos históricos de Wasabi se guardaron sin un MIME específico.
+      // La clave ya fue restringida a prefijos y extensiones seguras, por lo que se
+      // permite únicamente el tipo binario genérico y se sirve con el MIME inferido.
+      || tipoNormalizado === TIPO_GENERICO_ALMACENAMIENTO
+      || !tipoNormalizado
+    ),
   );
+};
+
+const tipoContenidoPorClave = (clave) => {
+  const tipos = TIPOS_PERMITIDOS[normalizarExtension(clave)];
+  return tipos ? [...tipos][0] : null;
 };
 
 module.exports = {
@@ -59,5 +74,6 @@ module.exports = {
   esCombinacionArchivoPermitida,
   normalizarExtension,
   sanitizarNombreDescarga,
+  tipoContenidoPorClave,
   validarClaveArchivo,
 };

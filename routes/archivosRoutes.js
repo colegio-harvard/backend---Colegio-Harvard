@@ -4,6 +4,7 @@ const { getFile } = require('../utils/storageService');
 const {
   esContenidoAlmacenadoPermitido,
   sanitizarNombreDescarga,
+  tipoContenidoPorClave,
   validarClaveArchivo,
 } = require('../services/archivos/politicaArchivos');
 
@@ -19,7 +20,9 @@ router.get('/', async (req, res) => {
     if (!esContenidoAlmacenadoPermitido(key, file.ContentType)) {
       return res.status(415).json({ error: 'Tipo de archivo no permitido' });
     }
-    if (file.ContentType) res.setHeader('Content-Type', file.ContentType);
+    // No se confía en el MIME histórico del objeto: se deriva de una extensión
+    // previamente validada para que las fotos antiguas genéricas se visualicen.
+    res.setHeader('Content-Type', tipoContenidoPorClave(key));
     if (file.ContentLength) res.setHeader('Content-Length', String(file.ContentLength));
     res.setHeader('Content-Disposition', `inline; filename="${sanitizarNombreDescarga(key)}"`);
     res.setHeader('Cache-Control', 'private, max-age=300, must-revalidate');

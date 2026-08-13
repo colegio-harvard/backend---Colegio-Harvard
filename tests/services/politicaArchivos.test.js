@@ -5,6 +5,7 @@ const {
   esCombinacionArchivoPermitida,
   normalizarExtension,
   sanitizarNombreDescarga,
+  tipoContenidoPorClave,
   validarClaveArchivo,
 } = require('../../services/archivos/politicaArchivos');
 
@@ -37,6 +38,15 @@ describe('politica de archivos', () => {
     expect(esContenidoAlmacenadoPermitido('fotos/alumno.png', 'image/png')).toBe(true);
     expect(esContenidoAlmacenadoPermitido('fotos/alumno.png', 'text/html')).toBe(false);
     expect(esContenidoAlmacenadoPermitido('adjuntos/reporte.pdf', 'application/pdf')).toBe(true);
+    expect(esContenidoAlmacenadoPermitido('fotos/alumno.jpg', 'application/octet-stream')).toBe(true);
+    expect(esContenidoAlmacenadoPermitido('fotos/alumno.webp', undefined)).toBe(true);
+    expect(esContenidoAlmacenadoPermitido('fotos/alumno.jpg', 'text/html')).toBe(false);
+  });
+
+  test('deriva un tipo seguro desde la extension validada', () => {
+    expect(tipoContenidoPorClave('fotos/alumno.JPG')).toBe('image/jpeg');
+    expect(tipoContenidoPorClave('fotos/alumno.webp')).toBe('image/webp');
+    expect(tipoContenidoPorClave('adjuntos/reporte.pdf')).toBe('application/pdf');
   });
 
   test('normaliza extensiones y nombres visibles', () => {
