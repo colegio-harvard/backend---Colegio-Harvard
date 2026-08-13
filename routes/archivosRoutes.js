@@ -71,6 +71,12 @@ const buscarClaveHistorica = async (referencia, codigoAlumno) => {
 };
 
 router.get('/', async (req, res) => {
+  // El frontend y el backend se publican en subdominios distintos de Railway.
+  // Las fotos se usan como recursos <img> entre esos dos orígenes, por lo que
+  // `same-site` hace que algunos navegadores las bloqueen aunque el archivo
+  // exista y la petición responda correctamente.
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
   let referencia = req.query.ref;
   let alumno = null;
   if (req.query.alumno) {
@@ -109,7 +115,6 @@ router.get('/', async (req, res) => {
     if (file.ContentLength) res.setHeader('Content-Length', String(file.ContentLength));
     res.setHeader('Content-Disposition', `inline; filename="${sanitizarNombreDescarga(key)}"`);
     res.setHeader('Cache-Control', 'private, max-age=300, must-revalidate');
-    res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     file.Body.once('error', streamError => {
       console.error('Error al transmitir archivo:', streamError);
