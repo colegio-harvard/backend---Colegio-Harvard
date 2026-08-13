@@ -8,15 +8,64 @@ const {
   validarClaveArchivo,
 } = require('../services/archivos/politicaArchivos');
 
-router.get('/', async (req, res) => {
-  const key = validarClaveArchivo(req.query.key);
+const clavesDesdeReferencia = (referencia) => {
+  const valor = String(referencia || '').trim();
+  if (!valor || valor.length > 2048 || valor.includes('\0')) return [];
 
-  if (!key) {
+  let ruta = valor;
+  try {
+    ruta = new URL(valor).pathname;
+  } catch {
+    // Las rutas relativas historicas se procesan directamente.
+  }
+
+  for (let intento = 0; intento < 2; intento += 1) {
+    try {
+      const decodificada = decodeURIComponent(ruta);
+      if (decodificada === ruta) break;
+      ruta = decodificada;
+    } catch {
+      break;
+    }
+  }
+
+  const segmentos = ruta.replace(/\\/g, '/').split('/').filter(Boolean);
+  const candidatos = [];
+  const indiceFotos = segmentos.findIndex(segmento => segmento.toLowerCase() === 'fotos');
+  if (indiceFotos >= 0) candidatos.push(`fotos/${segmentos.slice(indiceFotos + 1).join('/')}`);
+
+  // Versiones iniciales guardaron /uploads/<archivo> mientras Wasabi conservaba
+  // el objeto en fotos/<archivo>. Este candidato recupera esas referencias.
+  const nombre = segmentos.at(-1);
+  if (nombre) candidatos.push(`fotos/${nombre}`);
+
+  return [...new Set(candidatos.map(validarClaveArchivo).filter(Boolean))];
+};
+
+const obtenerPrimeraClaveExistente = async (claves) => {
+  for (const clave of claves) {
+    try {
+      return { clave, file: await getFile(clave) };
+    } catch (error) {
+      if (error.name !== 'NoSuchKey' && error.$metadata?.httpStatusCode !== 404) throw error;
+    }
+  }
+  return null;
+};
+
+router.get('/', async (req, res) => {
+  const claves = req.query.ref
+    ? clavesDesdeReferencia(req.query.ref)
+    : [validarClaveArchivo(req.query.key)].filter(Boolean);
+
+  if (!claves.length) {
     return res.status(400).json({ error: 'Archivo no valido' });
   }
 
   try {
-    const file = await getFile(key);
+    const resultado = await obtenerPrimeraClaveExistente(claves);
+    if (!resultado) return res.status(404).json({ error: 'Archivo no encontrado' });
+    const { clave: key, file } = resultado;
     if (!esContenidoAlmacenadoPermitido(key, file.ContentType)) {
       return res.status(415).json({ error: 'Tipo de archivo no permitido' });
     }

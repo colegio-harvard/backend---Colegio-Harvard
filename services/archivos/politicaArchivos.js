@@ -33,7 +33,7 @@ const validarClaveArchivo = (valor) => {
   if (!clave || clave.length > 512 || clave.includes('\0') || clave.includes('\\')) return null;
   if (clave.startsWith('/') || clave.includes('..') || clave.includes('//')) return null;
 
-  const prefijo = Object.keys(PREFIJOS_PERMITIDOS).find(item => clave.startsWith(item));
+  const prefijo = Object.keys(PREFIJOS_PERMITIDOS).find(item => clave.toLowerCase().startsWith(item));
   if (!prefijo) return null;
 
   const extension = normalizarExtension(clave);
@@ -47,7 +47,7 @@ const sanitizarNombreDescarga = (nombre = 'archivo') => {
 };
 
 const esContenidoAlmacenadoPermitido = (clave, mimetype) => {
-  const prefijo = Object.keys(PREFIJOS_PERMITIDOS).find(item => String(clave).startsWith(item));
+  const prefijo = Object.keys(PREFIJOS_PERMITIDOS).find(item => String(clave).toLowerCase().startsWith(item));
   const tipoNormalizado = String(mimetype || '').toLowerCase().trim();
   // Las fotos históricas fueron cargadas con distintos MIME (image/jpg,
   // binary/octet-stream, etc.). La clave ya se valida contra el prefijo fotos/
