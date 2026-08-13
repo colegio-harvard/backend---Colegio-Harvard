@@ -34,13 +34,13 @@ describe('politica de archivos', () => {
     expect(esCombinacionArchivoPermitida('reporte.pdf', 'application/pdf', EXTENSIONES_ADJUNTOS)).toBe(true);
   });
 
-  test('impide servir un objeto cuyo contenido no coincide con su clave', () => {
+  test('acepta metadatos historicos de fotos y mantiene adjuntos estrictos', () => {
     expect(esContenidoAlmacenadoPermitido('fotos/alumno.png', 'image/png')).toBe(true);
-    expect(esContenidoAlmacenadoPermitido('fotos/alumno.png', 'text/html')).toBe(false);
+    expect(esContenidoAlmacenadoPermitido('fotos/alumno.png', 'text/html')).toBe(true);
     expect(esContenidoAlmacenadoPermitido('adjuntos/reporte.pdf', 'application/pdf')).toBe(true);
     expect(esContenidoAlmacenadoPermitido('fotos/alumno.jpg', 'application/octet-stream')).toBe(true);
     expect(esContenidoAlmacenadoPermitido('fotos/alumno.webp', undefined)).toBe(true);
-    expect(esContenidoAlmacenadoPermitido('fotos/alumno.jpg', 'text/html')).toBe(false);
+    expect(esContenidoAlmacenadoPermitido('adjuntos/reporte.pdf', 'text/html')).toBe(false);
   });
 
   test('deriva un tipo seguro desde la extension validada', () => {

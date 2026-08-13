@@ -49,6 +49,11 @@ const sanitizarNombreDescarga = (nombre = 'archivo') => {
 const esContenidoAlmacenadoPermitido = (clave, mimetype) => {
   const prefijo = Object.keys(PREFIJOS_PERMITIDOS).find(item => String(clave).startsWith(item));
   const tipoNormalizado = String(mimetype || '').toLowerCase().trim();
+  // Las fotos históricas fueron cargadas con distintos MIME (image/jpg,
+  // binary/octet-stream, etc.). La clave ya se valida contra el prefijo fotos/
+  // y una extensión de imagen permitida; además se sirve con MIME inferido y
+  // nosniff, por lo que no se depende del metadato antiguo de Wasabi.
+  if (prefijo === 'fotos/') return true;
   return Boolean(
     prefijo
     && (
