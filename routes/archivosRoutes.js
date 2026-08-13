@@ -1,6 +1,8 @@
 const express = require('express');
+const path = require('path');
 const router = express.Router();
-const { getFile } = require('../utils/storageService');
+const prisma = require('../config/prisma');
+const { getFile, listFiles } = require('../utils/storageService');
 const {
   esContenidoAlmacenadoPermitido,
   sanitizarNombreDescarga,
@@ -53,9 +55,37 @@ const obtenerPrimeraClaveExistente = async (claves) => {
   return null;
 };
 
+const buscarClaveHistorica = async (referencia, codigoAlumno) => {
+  const segmentos = String(referencia || '').replace(/\\/g, '/').split('/').filter(Boolean);
+  const nombreEsperado = path.basename(segmentos.at(-1) || '').toLowerCase();
+  const codigo = String(codigoAlumno || '').toLowerCase();
+  const objetos = await listFiles('fotos/');
+
+  const porNombre = objetos.find(objeto => path.basename(objeto.Key || '').toLowerCase() === nombreEsperado);
+  if (porNombre) return porNombre.Key;
+
+  const porCodigo = codigo
+    ? objetos.filter(objeto => path.basename(objeto.Key || '').toLowerCase().includes(codigo))
+    : [];
+  return porCodigo.length === 1 ? porCodigo[0].Key : null;
+};
+
 router.get('/', async (req, res) => {
-  const claves = req.query.ref
-    ? clavesDesdeReferencia(req.query.ref)
+  let referencia = req.query.ref;
+  let alumno = null;
+  if (req.query.alumno) {
+    const id = Number.parseInt(req.query.alumno, 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Alumno no valido' });
+    alumno = await prisma.tbl_alumnos.findUnique({
+      where: { id },
+      select: { foto_url: true, codigo_alumno: true },
+    });
+    if (!alumno?.foto_url) return res.status(404).json({ error: 'El alumno no tiene foto registrada' });
+    referencia = alumno.foto_url;
+  }
+
+  const claves = referencia
+    ? clavesDesdeReferencia(referencia)
     : [validarClaveArchivo(req.query.key)].filter(Boolean);
 
   if (!claves.length) {
@@ -63,7 +93,11 @@ router.get('/', async (req, res) => {
   }
 
   try {
-    const resultado = await obtenerPrimeraClaveExistente(claves);
+    let resultado = await obtenerPrimeraClaveExistente(claves);
+    if (!resultado && alumno) {
+      const claveHistorica = await buscarClaveHistorica(referencia, alumno.codigo_alumno);
+      if (claveHistorica) resultado = await obtenerPrimeraClaveExistente([claveHistorica]);
+    }
     if (!resultado) return res.status(404).json({ error: 'Archivo no encontrado' });
     const { clave: key, file } = resultado;
     if (!esContenidoAlmacenadoPermitido(key, file.ContentType)) {

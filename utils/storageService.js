@@ -1,4 +1,4 @@
-const { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const s3 = require('../config/wasabi');
 
 const BUCKET = process.env.WASABI_BUCKET || 'colegio-fernando-storage';
@@ -39,6 +39,21 @@ const getFile = async (key) => {
   }));
 };
 
+const listFiles = async (prefix) => {
+  const objetos = [];
+  let continuationToken;
+  do {
+    const pagina = await s3.send(new ListObjectsV2Command({
+      Bucket: BUCKET,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    }));
+    objetos.push(...(pagina.Contents || []));
+    continuationToken = pagina.IsTruncated ? pagina.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return objetos;
+};
+
 /**
  * Construye la URL publica de un objeto en Wasabi.
  * @param {string} key - Ruta dentro del bucket
@@ -49,4 +64,4 @@ const getPublicUrl = (key) => {
   return `${endpoint}/${BUCKET}/${key}`;
 };
 
-module.exports = { uploadFile, deleteFile, getFile, getPublicUrl };
+module.exports = { uploadFile, deleteFile, getFile, listFiles, getPublicUrl };
