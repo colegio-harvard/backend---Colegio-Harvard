@@ -1,24 +1,29 @@
 const prisma = require('../config/prisma');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
-const { CANALES, ESTADOS_ENVIO, ESTADOS_COMPROMISO, alumnoActivo, normalizarTelefonoPeru, saldoPension, compromisoVigente, crearMensaje, crearEnlace } = require('../utils/cobranzaMensajeria');
+const { CANALES, ESTADOS_ENVIO, ESTADOS_COMPROMISO, alumnoActivo, normalizarTelefonoPeru, compromisoVigente, crearMensaje, crearEnlace } = require('../utils/cobranzaMensajeria');
+const { todayLima } = require('../utils/dateUtils');
+const { normalizarMesesPlantilla, montoTotalVigente } = require('../services/pensiones/calculoConceptos');
+const { conceptoExigible, fechaVencimientoConcepto } = require('../services/cobranzas/reglasVencimiento');
 
 const includeCobranza = {
   tbl_alumnos: { include: { tbl_padres_alumnos: { include: { tbl_padres: true } } } },
   tbl_compromisos_pago: { orderBy: { fecha_compromiso: 'desc' } },
 };
 
-function presentarCandidato(estado) {
+function presentarCandidato(estado, concepto, anio) {
   const activo = alumnoActivo(estado.tbl_alumnos);
   const vinculo = estado.tbl_alumnos.tbl_padres_alumnos;
   const padre = vinculo?.tbl_padres || null;
   const telefono = padre ? normalizarTelefonoPeru(padre.celular) : null;
-  const saldo = saldoPension(estado);
+  const montoTotal = montoTotalVigente(estado.tbl_alumnos, concepto || estado.clave_mes, estado);
+  const saldo = Math.max(0, Number((montoTotal - Number(estado.monto_pagado || 0)).toFixed(2)));
   const vigente = compromisoVigente(estado.tbl_compromisos_pago);
   const ultimo = vigente || (estado.tbl_compromisos_pago || []).find((c) => c.estado === 'VIGENTE') || null;
   return {
     id_estado_pension: estado.id, id_alumno: estado.id_alumno, alumno: estado.tbl_alumnos.nombre_completo,
     id_padre: padre?.id || null, apoderado: padre?.nombre_completo || null, telefono,
-    clave_mes: estado.clave_mes, saldo,
+    clave_mes: estado.clave_mes, concepto: concepto?.nombre || estado.clave_mes, saldo,
+    fecha_vencimiento: fechaVencimientoConcepto({ concepto: concepto || { clave: estado.clave_mes }, anio, fechaRegistro: estado.tbl_alumnos.date_time_registration })?.toISOString().slice(0, 10) || null,
     compromiso: ultimo ? { id: ultimo.id, fecha: ultimo.fecha_compromiso.toISOString().slice(0, 10), monto: ultimo.monto === null ? null : Number(ultimo.monto), estado: vigente ? vigente.estado : 'VENCIDO', observacion: ultimo.observacion } : null,
     elegible: activo && saldo > 0 && Boolean(padre && telefono) && !vigente,
     motivo_exclusion: !activo ? 'ALUMNO_NO_ACTIVO' : saldo <= 0 ? 'SIN_DEUDA' : !padre ? 'SIN_APODERADO' : !telefono ? 'TELEFONO_INVALIDO' : vigente ? 'COMPROMISO_VIGENTE' : null,
@@ -27,8 +32,27 @@ function presentarCandidato(estado) {
 
 async function listarCandidatos(req, res) {
   try {
-    const estados = await prisma.tbl_estado_pension.findMany({ where: { estado: { not: 'PAGADO' }, tbl_alumnos: { estado: 'ACTIVO' } }, include: includeCobranza, orderBy: [{ clave_mes: 'asc' }, { id_alumno: 'asc' }] });
-    res.json({ data: estados.map(presentarCandidato).filter((item) => item.saldo > 0) });
+    const anio = await prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
+    if (!anio) return res.status(400).json({ error: 'No hay año escolar activo' });
+    const plantilla = await prisma.tbl_plantilla_pension.findFirst({ where: { id_anio_escolar: anio.id } });
+    if (!plantilla) return res.status(404).json({ error: 'No hay plantilla de pagos configurada' });
+    const conceptos = normalizarMesesPlantilla(plantilla.meses_json);
+    const hoy = todayLima().date;
+    const alumnos = await prisma.tbl_alumnos.findMany({ where: { estado: 'ACTIVO' }, select: { id: true, monto_matricula: true, monto_materiales: true, monto_pension: true, date_time_registration: true } });
+    const pendientes = [];
+    for (const alumno of alumnos) {
+      for (const concepto of conceptos) {
+        if (!conceptoExigible({ concepto, anio: anio.anio, fechaRegistro: alumno.date_time_registration, hoy })) continue;
+        const total = montoTotalVigente(alumno, concepto, null);
+        if (total <= 0) continue;
+        pendientes.push({ id_plantilla: plantilla.id, id_alumno: alumno.id, clave_mes: concepto.clave, actualizado_por: req.user.id, estado: 'PENDIENTE', monto_total: total, monto_pagado: 0, user_id_registration: req.user.id });
+      }
+    }
+    if (pendientes.length) await prisma.tbl_estado_pension.createMany({ data: pendientes, skipDuplicates: true });
+    const conceptosPorClave = new Map(conceptos.map((x) => [x.clave, x]));
+    const estados = await prisma.tbl_estado_pension.findMany({ where: { id_plantilla: plantilla.id, estado: { in: ['PENDIENTE', 'PAGO_PARCIAL'] }, tbl_alumnos: { estado: 'ACTIVO' } }, include: includeCobranza, orderBy: [{ id_alumno: 'asc' }, { clave_mes: 'asc' }] });
+    const exigibles = estados.filter((estado) => conceptoExigible({ concepto: conceptosPorClave.get(estado.clave_mes), anio: anio.anio, fechaRegistro: estado.tbl_alumnos.date_time_registration, hoy }));
+    res.json({ data: exigibles.map((estado) => presentarCandidato(estado, conceptosPorClave.get(estado.clave_mes), anio.anio)).filter((item) => item.saldo > 0) });
   } catch (error) { console.error('Error al listar candidatos de cobranza:', error); res.status(500).json({ error: 'Error al listar candidatos de cobranza' }); }
 }
 
@@ -62,13 +86,17 @@ async function prepararMensajes(req, res) {
   if (!CANALES.has(canal)) return res.status(400).json({ error: 'Canal no valido' });
   if (!ids.length) return res.status(400).json({ error: 'Seleccione al menos una pension' });
   try {
-    const [estados, colegio] = await Promise.all([prisma.tbl_estado_pension.findMany({ where: { id: { in: ids } }, include: includeCobranza }), prisma.tbl_colegio.findFirst()]);
+    const [estados, colegio, anio] = await Promise.all([prisma.tbl_estado_pension.findMany({ where: { id: { in: ids } }, include: { ...includeCobranza, tbl_plantilla_pension: true } }), prisma.tbl_colegio.findFirst(), prisma.tbl_anios_escolares.findFirst({ where: { activo: true } })]);
     const preparados = []; const omitidos = []; const grupos = new Map();
     for (const estado of estados) {
-      const candidato = presentarCandidato(estado);
+      const conceptos = normalizarMesesPlantilla(estado.tbl_plantilla_pension?.meses_json);
+      const concepto = conceptos.find((x) => x.clave === estado.clave_mes);
+      const exigible = conceptoExigible({ concepto, anio: anio?.anio, fechaRegistro: estado.tbl_alumnos.date_time_registration, hoy: todayLima().date });
+      const candidato = presentarCandidato(estado, concepto, anio?.anio);
+      if (!exigible) candidato.elegible = false, candidato.motivo_exclusion = 'NO_VENCIDO';
       if (!candidato.elegible) { omitidos.push({ id_estado_pension: estado.id, motivo: candidato.motivo_exclusion }); continue; }
       const grupo = grupos.get(candidato.id_alumno) || { candidato, conceptos: [] };
-      grupo.conceptos.push({ id_estado_pension: estado.id, clave_mes: candidato.clave_mes, saldo: candidato.saldo });
+      grupo.conceptos.push({ id_estado_pension: estado.id, clave_mes: candidato.clave_mes, concepto: candidato.concepto, saldo: candidato.saldo });
       grupos.set(candidato.id_alumno, grupo);
     }
     for (const { candidato, conceptos } of grupos.values()) {
