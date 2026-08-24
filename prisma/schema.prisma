@@ -79,6 +79,8 @@ model tbl_usuarios {
   tbl_padres                                tbl_padres?
   tbl_pagos_pension                         tbl_pagos_pension[]
   tbl_plantilla_pension                     tbl_plantilla_pension[]
+  tbl_compromisos_pago                      tbl_compromisos_pago[]
+  tbl_cobranza_envios                       tbl_cobranza_envios[]
   tbl_reportes_semanales                    tbl_reportes_semanales[]
   tbl_roles                                 tbl_roles                               @relation(fields: [id_rol], references: [id], onDelete: NoAction)
 }
@@ -233,6 +235,7 @@ model tbl_padres {
   tbl_usuarios               tbl_usuarios                 @relation(fields: [id_usuario], references: [id], onDelete: NoAction)
   tbl_padres_alumnos         tbl_padres_alumnos[]
   tbl_respuestas_agenda      tbl_respuestas_agenda[]
+  tbl_cobranza_envios        tbl_cobranza_envios[]
 }
 
 model tbl_alumnos {
@@ -637,9 +640,55 @@ model tbl_estado_pension {
   tbl_alumnos            tbl_alumnos           @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
   tbl_plantilla_pension  tbl_plantilla_pension @relation(fields: [id_plantilla], references: [id], onDelete: NoAction)
   tbl_pagos_pension      tbl_pagos_pension[]
+  tbl_compromisos_pago   tbl_compromisos_pago[]
+  tbl_cobranza_envios    tbl_cobranza_envios[]
 
   @@unique([id_alumno, clave_mes], map: "uq_alumno_mes")
   @@index([id_plantilla, estado, clave_mes], map: "idx_estado_pension_plantilla_estado_clave")
+}
+
+model tbl_compromisos_pago {
+  id                     Int                @id @default(autoincrement())
+  id_estado_pension      Int
+  fecha_compromiso       DateTime           @db.Date
+  monto                  Decimal?           @db.Decimal(10, 2)
+  estado                 String             @default("VIGENTE") @db.VarChar(20)
+  observacion            String?            @db.VarChar(255)
+  creado_por             Int
+  user_id_registration   Int?
+  date_time_registration DateTime?          @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?          @db.Timestamptz(6)
+  tbl_estado_pension     tbl_estado_pension @relation(fields: [id_estado_pension], references: [id], onDelete: Cascade)
+  tbl_usuarios           tbl_usuarios       @relation(fields: [creado_por], references: [id], onDelete: NoAction)
+
+  @@index([id_estado_pension, estado])
+  @@index([fecha_compromiso])
+}
+
+model tbl_cobranza_envios {
+  id                     Int                @id @default(autoincrement())
+  id_estado_pension      Int
+  id_padre               Int
+  canal                  String             @db.VarChar(20)
+  telefono               String             @db.VarChar(20)
+  mensaje                String
+  estado                 String             @default("PREPARADO") @db.VarChar(20)
+  enlace_apertura        String?
+  error                  String?            @db.VarChar(255)
+  creado_por             Int
+  preparado_en           DateTime           @default(now()) @db.Timestamptz(6)
+  enviado_en             DateTime?          @db.Timestamptz(6)
+  user_id_registration   Int?
+  date_time_registration DateTime?          @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?          @db.Timestamptz(6)
+  tbl_estado_pension     tbl_estado_pension @relation(fields: [id_estado_pension], references: [id], onDelete: Cascade)
+  tbl_padres             tbl_padres         @relation(fields: [id_padre], references: [id], onDelete: NoAction)
+  tbl_usuarios           tbl_usuarios       @relation(fields: [creado_por], references: [id], onDelete: NoAction)
+
+  @@index([estado, canal])
+  @@index([id_estado_pension])
 }
 
 model tbl_pagos_pension {
@@ -714,3 +763,4 @@ model tbl_destinatarios_notif_personalizada {
 
   @@unique([id_notif_personalizada, id_usuario], map: "uq_notif_personal_usuario")
 }
+

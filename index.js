@@ -35,6 +35,7 @@ const notifPersonalizadasRoutes = require('./routes/notifPersonalizadasRoutes');
 const archivosRoutes = require('./routes/archivosRoutes');
 const backupRoutes = require('./routes/backupRoutes');
 const libretasRoutes = require('./routes/libretasRoutes');
+const cobranzasRoutes = require('./routes/cobranzasRoutes');
 
 // --- Controller para cron ---
 const { ejecutarAlertasNoLlego } = require('./controllers/alertasController');
@@ -89,6 +90,7 @@ app.use('/api/notificaciones-personalizadas', notifPersonalizadasRoutes);
 app.use('/api/archivos', archivosRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/libretas', libretasRoutes);
+app.use('/api/cobranzas', cobranzasRoutes);
 
 // --- Ruta de prueba ---
 app.get('/api/ping', async (req, res) => {
@@ -189,3 +191,4 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  CORS origen: ${corsOptions.origin === '*' ? '* (cualquier origen — modo local)' : corsOptions.origin}`);
   console.log('='.repeat(55));
 });
+
