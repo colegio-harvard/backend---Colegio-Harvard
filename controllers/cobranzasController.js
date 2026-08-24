@@ -16,7 +16,7 @@ function presentarCandidato(estado) {
   const vigente = compromisoVigente(estado.tbl_compromisos_pago);
   const ultimo = vigente || (estado.tbl_compromisos_pago || []).find((c) => c.estado === 'VIGENTE') || null;
   return {
-    id_estado_pension: estado.id, alumno: estado.tbl_alumnos.nombre_completo,
+    id_estado_pension: estado.id, id_alumno: estado.id_alumno, alumno: estado.tbl_alumnos.nombre_completo,
     id_padre: padre?.id || null, apoderado: padre?.nombre_completo || null, telefono,
     clave_mes: estado.clave_mes, saldo,
     compromiso: ultimo ? { id: ultimo.id, fecha: ultimo.fecha_compromiso.toISOString().slice(0, 10), monto: ultimo.monto === null ? null : Number(ultimo.monto), estado: vigente ? vigente.estado : 'VENCIDO', observacion: ultimo.observacion } : null,
@@ -63,13 +63,18 @@ async function prepararMensajes(req, res) {
   if (!ids.length) return res.status(400).json({ error: 'Seleccione al menos una pension' });
   try {
     const [estados, colegio] = await Promise.all([prisma.tbl_estado_pension.findMany({ where: { id: { in: ids } }, include: includeCobranza }), prisma.tbl_colegio.findFirst()]);
-    const preparados = []; const omitidos = [];
+    const preparados = []; const omitidos = []; const grupos = new Map();
     for (const estado of estados) {
       const candidato = presentarCandidato(estado);
       if (!candidato.elegible) { omitidos.push({ id_estado_pension: estado.id, motivo: candidato.motivo_exclusion }); continue; }
-      const mensaje = crearMensaje({ canal, colegio: colegio?.nombre || 'COLEGIO HARVARD', alumno: candidato.alumno, mes: candidato.clave_mes, saldo: candidato.saldo, telefonoContacto: colegio && (colegio.telefono_whatsapp || colegio.telefono) });
-      const envio = await prisma.tbl_cobranza_envios.create({ data: { id_estado_pension: estado.id, id_padre: candidato.id_padre, canal, telefono: candidato.telefono, mensaje, enlace_apertura: crearEnlace(canal, candidato.telefono, mensaje), creado_por: req.user.id, user_id_registration: req.user.id } });
-      preparados.push({ ...envio, alumno: candidato.alumno, apoderado: candidato.apoderado });
+      const grupo = grupos.get(candidato.id_alumno) || { candidato, conceptos: [] };
+      grupo.conceptos.push({ id_estado_pension: estado.id, clave_mes: candidato.clave_mes, saldo: candidato.saldo });
+      grupos.set(candidato.id_alumno, grupo);
+    }
+    for (const { candidato, conceptos } of grupos.values()) {
+      const mensaje = crearMensaje({ canal, colegio: colegio?.nombre || 'COLEGIO HARVARD', alumno: candidato.alumno, conceptos, telefonoContacto: colegio && (colegio.telefono_whatsapp || colegio.telefono) });
+      const envio = await prisma.tbl_cobranza_envios.create({ data: { id_estado_pension: conceptos[0].id_estado_pension, id_padre: candidato.id_padre, canal, telefono: candidato.telefono, mensaje, enlace_apertura: crearEnlace(canal, candidato.telefono, mensaje), creado_por: req.user.id, user_id_registration: req.user.id } });
+      preparados.push({ ...envio, alumno: candidato.alumno, apoderado: candidato.apoderado, conceptos });
     }
     await registrarAuditoria({ userId: req.user.id, accion: 'PREPARAR_COBRANZA', tipoEntidad: 'tbl_cobranza_envios', resumen: `${preparados.length} mensajes ${canal} preparados`, meta: { ids, omitidos }, req });
     res.status(201).json({ data: { preparados, omitidos } });
@@ -90,5 +95,4 @@ async function actualizarEstadoEnvio(req, res) {
 }
 
 module.exports = { listarCandidatos, registrarCompromiso, actualizarCompromiso, prepararMensajes, listarCola, actualizarEstadoEnvio };
-
 
