@@ -1,6 +1,6 @@
 const prisma = require('../config/prisma');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
-const { CANALES, ESTADOS_ENVIO, ESTADOS_COMPROMISO, normalizarTelefonoPeru, saldoPension, compromisoVigente, crearMensaje, crearEnlace } = require('../utils/cobranzaMensajeria');
+const { CANALES, ESTADOS_ENVIO, ESTADOS_COMPROMISO, alumnoActivo, normalizarTelefonoPeru, saldoPension, compromisoVigente, crearMensaje, crearEnlace } = require('../utils/cobranzaMensajeria');
 
 const includeCobranza = {
   tbl_alumnos: { include: { tbl_padres_alumnos: { include: { tbl_padres: true } } } },
@@ -8,6 +8,7 @@ const includeCobranza = {
 };
 
 function presentarCandidato(estado) {
+  const activo = alumnoActivo(estado.tbl_alumnos);
   const vinculo = estado.tbl_alumnos.tbl_padres_alumnos;
   const padre = vinculo?.tbl_padres || null;
   const telefono = padre ? normalizarTelefonoPeru(padre.celular) : null;
@@ -19,14 +20,14 @@ function presentarCandidato(estado) {
     id_padre: padre?.id || null, apoderado: padre?.nombre_completo || null, telefono,
     clave_mes: estado.clave_mes, saldo,
     compromiso: ultimo ? { id: ultimo.id, fecha: ultimo.fecha_compromiso.toISOString().slice(0, 10), monto: ultimo.monto === null ? null : Number(ultimo.monto), estado: vigente ? vigente.estado : 'VENCIDO', observacion: ultimo.observacion } : null,
-    elegible: saldo > 0 && Boolean(padre && telefono) && !vigente,
-    motivo_exclusion: saldo <= 0 ? 'SIN_DEUDA' : !padre ? 'SIN_APODERADO' : !telefono ? 'TELEFONO_INVALIDO' : vigente ? 'COMPROMISO_VIGENTE' : null,
+    elegible: activo && saldo > 0 && Boolean(padre && telefono) && !vigente,
+    motivo_exclusion: !activo ? 'ALUMNO_NO_ACTIVO' : saldo <= 0 ? 'SIN_DEUDA' : !padre ? 'SIN_APODERADO' : !telefono ? 'TELEFONO_INVALIDO' : vigente ? 'COMPROMISO_VIGENTE' : null,
   };
 }
 
 async function listarCandidatos(req, res) {
   try {
-    const estados = await prisma.tbl_estado_pension.findMany({ where: { estado: { not: 'PAGADO' } }, include: includeCobranza, orderBy: [{ clave_mes: 'asc' }, { id_alumno: 'asc' }] });
+    const estados = await prisma.tbl_estado_pension.findMany({ where: { estado: { not: 'PAGADO' }, tbl_alumnos: { estado: 'ACTIVO' } }, include: includeCobranza, orderBy: [{ clave_mes: 'asc' }, { id_alumno: 'asc' }] });
     res.json({ data: estados.map(presentarCandidato).filter((item) => item.saldo > 0) });
   } catch (error) { console.error('Error al listar candidatos de cobranza:', error); res.status(500).json({ error: 'Error al listar candidatos de cobranza' }); }
 }
@@ -89,6 +90,5 @@ async function actualizarEstadoEnvio(req, res) {
 }
 
 module.exports = { listarCandidatos, registrarCompromiso, actualizarCompromiso, prepararMensajes, listarCola, actualizarEstadoEnvio };
-
 
 
