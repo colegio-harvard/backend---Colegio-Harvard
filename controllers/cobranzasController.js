@@ -100,7 +100,7 @@ async function prepararMensajes(req, res) {
       grupos.set(candidato.id_alumno, grupo);
     }
     for (const { candidato, conceptos } of grupos.values()) {
-      const mensaje = crearMensaje({ canal, colegio: colegio?.nombre || 'COLEGIO HARVARD', alumno: candidato.alumno, conceptos, telefonoContacto: colegio && (colegio.telefono_whatsapp || colegio.telefono) });
+      const mensaje = crearMensaje({ canal, colegio: 'COLEGIO HARVARD', alumno: candidato.alumno, conceptos, telefonoContacto: colegio && (colegio.telefono_whatsapp || colegio.telefono) });
       const envio = await prisma.tbl_cobranza_envios.create({ data: { id_estado_pension: conceptos[0].id_estado_pension, id_padre: candidato.id_padre, canal, telefono: candidato.telefono, mensaje, enlace_apertura: crearEnlace(canal, candidato.telefono, mensaje), creado_por: req.user.id, user_id_registration: req.user.id } });
       preparados.push({ ...envio, alumno: candidato.alumno, apoderado: candidato.apoderado, conceptos });
     }
