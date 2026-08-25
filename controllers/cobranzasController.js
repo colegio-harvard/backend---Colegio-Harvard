@@ -20,7 +20,7 @@ function presentarCandidato(estado, concepto, anio) {
   const vigente = compromisoVigente(estado.tbl_compromisos_pago);
   const ultimo = vigente || (estado.tbl_compromisos_pago || []).find((c) => c.estado === 'VIGENTE') || null;
   return {
-    id_estado_pension: estado.id, id_alumno: estado.id_alumno, alumno: estado.tbl_alumnos.nombre_completo,
+    id_estado_pension: estado.id, id_alumno: estado.id_alumno, codigo_alumno: estado.tbl_alumnos.codigo_alumno, alumno: estado.tbl_alumnos.nombre_completo,
     id_padre: padre?.id || null, apoderado: padre?.nombre_completo || null, telefono,
     clave_mes: estado.clave_mes, concepto: concepto?.nombre || estado.clave_mes, saldo,
     fecha_vencimiento: fechaVencimientoConcepto({ concepto: concepto || { clave: estado.clave_mes }, anio, fechaRegistro: estado.tbl_alumnos.date_time_registration })?.toISOString().slice(0, 10) || null,
