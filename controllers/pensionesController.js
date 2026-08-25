@@ -294,6 +294,10 @@ const buildTicket = ({ codigo, pago, alumno, plantilla, estadoPension, concepto,
       aula: aulaTexto,
       nivel: aula?.tbl_grados?.tbl_niveles?.nombre || null,
     },
+    apoderado: alumno?.tbl_padres_alumnos?.tbl_padres ? {
+      nombre_completo: alumno.tbl_padres_alumnos.tbl_padres.nombre_completo || '',
+      celular: alumno.tbl_padres_alumnos.tbl_padres.celular || '',
+    } : null,
     pension: {
       anio_escolar: plantilla?.tbl_anios_escolares?.anio || null,
       clave_mes: estadoPension.clave_mes,
@@ -325,6 +329,11 @@ const selectAlumnoTicket = {
     select: {
       seccion: true,
       tbl_grados: { select: { nombre: true, tbl_niveles: { select: { nombre: true } } } },
+    },
+  },
+  tbl_padres_alumnos: {
+    select: {
+      tbl_padres: { select: { nombre_completo: true, celular: true } },
     },
   },
 };
@@ -970,7 +979,7 @@ const cuadricula = async (req, res) => {
       where,
       include: {
         tbl_aulas: { include: { tbl_grados: { include: { tbl_niveles: { select: { nombre: true } } } } } },
-        tbl_padres_alumnos: { include: { tbl_padres: { select: { id: true, nombre_completo: true, dni: true } } } },
+        tbl_padres_alumnos: { include: { tbl_padres: { select: { id: true, nombre_completo: true, dni: true, celular: true } } } },
         tbl_estado_pension: plantilla ? { where: { id_plantilla: plantilla.id } } : true,
       },
       orderBy: { nombre_completo: 'asc' },
@@ -997,6 +1006,7 @@ const cuadricula = async (req, res) => {
         id: a.tbl_padres_alumnos.tbl_padres.id,
         nombre_completo: a.tbl_padres_alumnos.tbl_padres.nombre_completo,
         dni: a.tbl_padres_alumnos.tbl_padres.dni,
+        celular: a.tbl_padres_alumnos.tbl_padres.celular,
       } : null,
       pensiones: (a.tbl_estado_pension || []).map(e => {
         const concepto = conceptosPorClave.get(e.clave_mes) || e.clave_mes;
@@ -1713,3 +1723,4 @@ const aplicarImportacionExcel = async (req, res) => {
 };
 
 module.exports = { obtenerPlantilla, obtenerEstado, registrarPago, obtenerTicket, listarTickets, obtenerDetalleMes, cuadricula, exportarReportePagosExcel, exportarDeudoresConceptoExcel, dashboardPensiones, guardarPlantilla, previewImportacionExcel, aplicarImportacionExcel };
+
