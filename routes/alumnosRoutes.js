@@ -25,6 +25,7 @@ router.post('/vincular', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), c
 router.get('/carnet/:id_alumno', verificarToken, ctrl.obtenerCarnet);
 router.get('/:id/retiro', verificarToken, verificarRol('SUPER_ADMIN'), retirosCtrl.obtenerInfoRetiro);
 router.post('/:id/retirar', verificarToken, verificarRol('SUPER_ADMIN'), retirosCtrl.retirar);
+router.post('/:id/reactivar', verificarToken, verificarRol('SUPER_ADMIN'), retirosCtrl.reactivar);
 router.delete('/desvincular/:id_alumno', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.desvincularPadre);
 router.post('/reemitir-carnet/:id_alumno', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.reemitirCarnet);
 router.get('/:id', verificarToken, ctrl.obtenerPorId);
@@ -33,3 +34,4 @@ router.post('/:id/foto', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), u
 router.delete('/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.eliminar);
 
 module.exports = router;
+

@@ -136,4 +136,67 @@ const retirar = async (req, res) => {
   }
 };
 
-module.exports = { obtenerInfoRetiro, retirar };
+const reactivar = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const fechaReingreso = String(req.body.fecha_reingreso || '').trim();
+    const primeraClave = String(req.body.primera_clave_cobro || '').trim();
+    const observacion = String(req.body.observacion_reingreso || '').trim();
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Alumno inválido' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaReingreso)) return res.status(400).json({ error: 'Indique una fecha de reingreso válida' });
+    if (!primeraClave) return res.status(400).json({ error: 'Seleccione el primer concepto que corresponde cobrar' });
+
+    const ctx = await cargarContexto(id);
+    if (ctx.error) return res.status(ctx.error[0]).json({ error: ctx.error[1] });
+    if (ctx.alumno.estado !== 'RETIRADO') return res.status(409).json({ error: 'El alumno no se encuentra retirado' });
+    const indice = ctx.conceptos.findIndex(c => c.clave === primeraClave);
+    if (indice < 0) return res.status(400).json({ error: 'El concepto seleccionado no pertenece a la plantilla actual' });
+
+    const deudaHistorica = ctx.conceptos.reduce((suma, concepto) => {
+      const estado = ctx.mapa.get(concepto.clave);
+      if (estado?.estado === 'NO_CORRESPONDE') return suma;
+      return suma + Math.max(monto(ctx.alumno, concepto) - Number(estado?.monto_pagado || 0), 0);
+    }, 0);
+    const primerEstado = ctx.mapa.get(primeraClave);
+    const cobroReingreso = !primerEstado || primerEstado.estado === 'NO_CORRESPONDE'
+      ? Math.max(monto(ctx.alumno, ctx.conceptos[indice]) - Number(primerEstado?.monto_pagado || 0), 0)
+      : 0;
+    const detalle = `Reingreso efectivo ${fechaReingreso}. Primer concepto reactivado: ${ctx.conceptos[indice].nombre}.`;
+
+    await prisma.$transaction(async tx => {
+      for (const concepto of ctx.conceptos.slice(indice)) {
+        const estadoActual = ctx.mapa.get(concepto.clave);
+        if (estadoActual && estadoActual.estado !== 'NO_CORRESPONDE') continue;
+        await tx.tbl_estado_pension.upsert({
+          where: { id_alumno_clave_mes: { id_alumno: id, clave_mes: concepto.clave } },
+          update: {
+            id_plantilla: ctx.plantilla.id, estado: 'PENDIENTE', monto_total: monto(ctx.alumno, concepto), monto_pagado: 0,
+            observacion_no_corresponde: null, actualizado_por: req.user.id,
+            user_id_modification: req.user.id, date_time_modification: new Date(),
+          },
+          create: {
+            id_plantilla: ctx.plantilla.id, id_alumno: id, clave_mes: concepto.clave,
+            estado: 'PENDIENTE', monto_total: monto(ctx.alumno, concepto), monto_pagado: 0,
+            actualizado_por: req.user.id, user_id_registration: req.user.id,
+          },
+        });
+      }
+      await tx.tbl_alumnos.update({
+        where: { id },
+        data: { estado: 'ACTIVO', user_id_modification: req.user.id, date_time_modification: new Date() },
+      });
+    });
+    await registrarAuditoria({
+      userId: req.user.id, accion: 'REACTIVAR_ALUMNO', tipoEntidad: 'tbl_alumnos', idEntidad: id,
+      resumen: `${ctx.alumno.codigo_alumno} reactivado el ${fechaReingreso}; cobra desde ${ctx.conceptos[indice].nombre}`,
+      req, meta: { fecha_reingreso: fechaReingreso, primera_clave_cobro: primeraClave, observacion: observacion || null, detalle },
+    });
+    res.json({ data: { id, estado: 'ACTIVO', deuda_historica: deudaHistorica, cobro_reingreso: cobroReingreso, total_para_reincorporarse: deudaHistorica + cobroReingreso }, message: 'Alumno reactivado. Se conservó la deuda histórica y se habilitaron los conceptos desde el periodo seleccionado.' });
+  } catch (error) {
+    console.error('Error al reactivar alumno:', error);
+    res.status(500).json({ error: 'No se pudo reactivar al alumno' });
+  }
+};
+
+module.exports = { obtenerInfoRetiro, retirar, reactivar };
+
