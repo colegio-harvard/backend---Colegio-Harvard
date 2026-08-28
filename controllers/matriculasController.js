@@ -20,6 +20,9 @@ const json = (value, fallback) => {
 };
 const ipCliente = (req) => String(req.ip || req.headers['x-forwarded-for'] || '').slice(0, 80);
 const agenteCliente = (req) => String(req.headers['user-agent'] || '').slice(0, 1000);
+const fechaLima = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const fechaISO = (value) => value ? new Date(value).toISOString().slice(0, 10) : null;
+const dentroDeCampana = (config) => (!config.fecha_inicio || fechaLima() >= fechaISO(config.fecha_inicio)) && (!config.fecha_fin || fechaLima() <= fechaISO(config.fecha_fin));
 
 async function anioActivo() {
   return prisma.tbl_anios_escolares.findFirst({ where: { activo: true }, orderBy: { anio: 'desc' } });
@@ -126,6 +129,7 @@ async function invitar(req, res) {
     const configRows = await prisma.$queryRawUnsafe(`SELECT * FROM "tbl_config_matricula" WHERE id_anio_escolar=$1`, anio.id);
     const config = configRows[0];
     if (!config?.activo) return res.status(409).json({ error: 'Configure y active primero la campaña de matrícula' });
+    if (!dentroDeCampana(config)) return res.status(409).json({ error: 'La campaña de matrícula está fuera de sus fechas de inicio y cierre' });
     const alumno = datos[0];
     const deuda = await obtenerDeuda(idAlumno);
     const token = crypto.randomBytes(32).toString('hex');
@@ -163,9 +167,10 @@ async function invitar(req, res) {
 async function obtenerPublica(req, res) {
   try {
     const tokenHash = sha256(req.params.token);
-    const rows = await prisma.$queryRawUnsafe(`SELECT md.*,ae.anio FROM "tbl_matriculas_digitales" md JOIN "tbl_anios_escolares" ae ON ae.id=md.id_anio_escolar WHERE md.token_hash=$1`, tokenHash);
+    const rows = await prisma.$queryRawUnsafe(`SELECT md.*,ae.anio,cm.fecha_inicio,cm.fecha_fin,cm.activo campana_activa FROM "tbl_matriculas_digitales" md JOIN "tbl_anios_escolares" ae ON ae.id=md.id_anio_escolar JOIN "tbl_config_matricula" cm ON cm.id_anio_escolar=md.id_anio_escolar WHERE md.token_hash=$1`, tokenHash);
     const item = rows[0];
     if (!item) return res.status(404).json({ error: 'Invitación no encontrada' });
+    if ((!item.campana_activa || !dentroDeCampana(item)) && !['ACEPTADA','COMPLETADA'].includes(item.estado)) return res.status(410).json({ error: 'La campaña de matrícula no se encuentra habilitada en este momento.' });
     if (item.invitacion_vence_en && new Date(item.invitacion_vence_en) < new Date() && !['ACEPTADA','COMPLETADA'].includes(item.estado)) return res.status(410).json({ error: 'La invitación venció. Solicite una nueva al colegio.' });
     if (item.estado === 'ENVIADA') {
       await prisma.$executeRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET estado='ABIERTA',actualizado_en=NOW() WHERE id=$1`, item.id);
@@ -183,10 +188,11 @@ async function aceptar(req, res) {
   try {
     const token = req.params.token;
     const tokenHash = sha256(token);
-    const rows = await prisma.$queryRawUnsafe(`SELECT * FROM "tbl_matriculas_digitales" WHERE token_hash=$1 FOR UPDATE`, tokenHash);
+    const rows = await prisma.$queryRawUnsafe(`SELECT md.*,cm.fecha_inicio,cm.fecha_fin,cm.activo campana_activa FROM "tbl_matriculas_digitales" md JOIN "tbl_config_matricula" cm ON cm.id_anio_escolar=md.id_anio_escolar WHERE md.token_hash=$1 FOR UPDATE OF md`, tokenHash);
     const item = rows[0];
     if (!item) return res.status(404).json({ error: 'Invitación no encontrada' });
     if (['ACEPTADA','COMPLETADA'].includes(item.estado)) return res.status(409).json({ error: 'Esta matrícula ya fue aceptada' });
+    if (!item.campana_activa || !dentroDeCampana(item)) return res.status(410).json({ error: 'La campaña de matrícula no se encuentra habilitada en este momento.' });
     if (new Date(item.invitacion_vence_en) < new Date() || new Date(item.otp_vence_en) < new Date()) return res.status(410).json({ error: 'El código venció. Solicite una nueva invitación.' });
     if (Number(item.otp_intentos) >= 5) return res.status(429).json({ error: 'Se agotaron los intentos. Solicite una nueva invitación.' });
     const otpValido = crypto.timingSafeEqual(Buffer.from(item.otp_hash), Buffer.from(sha256(`${token}:${String(req.body.otp || '')}`)));
