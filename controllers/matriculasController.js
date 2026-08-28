@@ -130,6 +130,12 @@ async function invitar(req, res) {
     const config = configRows[0];
     if (!config?.activo) return res.status(409).json({ error: 'Configure y active primero la campaña de matrícula' });
     if (!dentroDeCampana(config)) return res.status(409).json({ error: 'La campaña de matrícula está fuera de sus fechas de inicio y cierre' });
+    const matriculasExistentes = await prisma.$queryRawUnsafe(`
+      SELECT id,estado FROM "tbl_matriculas_digitales"
+      WHERE id_anio_escolar=$1 AND id_alumno=$2`, anio.id, idAlumno);
+    if (['ACEPTADA', 'COMPLETADA'].includes(matriculasExistentes[0]?.estado)) {
+      return res.status(409).json({ error: 'La matrícula ya fue aceptada. Abra el expediente para revisarla; no necesita reenviar la invitación.' });
+    }
     const alumno = datos[0];
     const deuda = await obtenerDeuda(idAlumno);
     const token = crypto.randomBytes(32).toString('hex');
