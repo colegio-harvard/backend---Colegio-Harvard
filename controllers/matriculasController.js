@@ -7,6 +7,8 @@ const DOCUMENTOS_BASE = [
   { clave: 'reglamento', nombre: 'Reglamento interno', obligatorio: true },
   { clave: 'economico', nombre: 'Condiciones y compromiso económico', obligatorio: true },
   { clave: 'datos', nombre: 'Tratamiento de datos personales', obligatorio: true },
+  { clave: 'convivencia', nombre: 'Normas de convivencia escolar', obligatorio: true },
+  { clave: 'emergencia', nombre: 'Ficha de emergencia y personas autorizadas para recoger al estudiante', obligatorio: true },
   { clave: 'imagen', nombre: 'Autorización de uso de imagen', obligatorio: false },
 ];
 const ESTADOS_REVISION = new Set(['OBSERVADA', 'COMPLETADA']);
@@ -32,7 +34,9 @@ async function registrarEvento(idMatricula, evento, detalle, req, creadoPor = nu
 
 function documentosConfigurados(config) {
   const docs = json(config?.documentos_json, []);
-  return Array.isArray(docs) && docs.length ? docs : DOCUMENTOS_BASE;
+  if (!Array.isArray(docs) || !docs.length) return DOCUMENTOS_BASE;
+  const claves = new Set(docs.map((doc) => doc.clave));
+  return [...docs, ...DOCUMENTOS_BASE.filter((doc) => !claves.has(doc.clave))];
 }
 
 async function obtenerDeuda(idAlumno) {
@@ -197,7 +201,9 @@ async function aceptar(req, res) {
     if (faltantes.length) return res.status(400).json({ error: 'Debe aceptar todos los documentos obligatorios' });
     if (aceptaciones.declaracion !== true) return res.status(400).json({ error: 'Debe confirmar la declaración final' });
     const formulario = req.body.formulario || {};
+    const autorizado = formulario.persona_autorizada_1 || {};
     if (!String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim()) return res.status(400).json({ error: 'Complete celular, dirección y contacto de emergencia' });
+    if (!String(autorizado.nombre || '').trim() || !String(autorizado.dni || '').trim() || !String(autorizado.parentesco || '').trim() || !String(autorizado.celular || '').trim()) return res.status(400).json({ error: 'Registre por lo menos una persona autorizada con nombre, DNI, parentesco y celular' });
     const aceptadoEn = new Date();
     const evidencia = { codigo: item.codigo, datos: json(item.datos_snapshot, {}), formulario, documentos, aceptaciones, aceptado_en: aceptadoEn.toISOString() };
     const hashEvidencia = sha256(JSON.stringify(evidencia));
