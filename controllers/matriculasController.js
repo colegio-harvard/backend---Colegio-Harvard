@@ -22,6 +22,11 @@ const AUTORIZACIONES = {
 };
 const AUTORIZACIONES_OBLIGATORIAS = ['tratamiento_datos', 'comunicaciones_contractuales', 'reporte_crediticio', 'emergencia_medica'];
 const ESTADOS_REVISION = new Set(['OBSERVADA', 'COMPLETADA']);
+const CAMPOS_VERIFICADOS_COLEGIO = [
+  'alumno_apellido_paterno', 'alumno_apellido_materno', 'alumno_nombres', 'alumno_dni', 'alumno_fecha_nacimiento', 'alumno_sexo', 'alumno_pais_origen', 'alumno_ubicacion_origen', 'alumno_requiere_cuidado_especial', 'alumno_detalle_cuidado_especial',
+  'representante_apellido_paterno', 'representante_apellido_materno', 'representante_nombres', 'representante_dni', 'vinculo_representante',
+  'tipo_ingreso', 'condicion_promocion', 'anio_escolar_anterior', 'nivel_anterior', 'grado_anterior', 'institucion_procedencia', 'codigo_modular_procedencia', 'ubicacion_procedencia',
+];
 const sha256 = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
 const json = (value, fallback) => {
   if (value === null || value === undefined) return fallback;
@@ -211,6 +216,7 @@ async function aceptar(req, res) {
     const item = rows[0];
     if (!item) return res.status(404).json({ error: 'Invitación no encontrada' });
     if (['ACEPTADA','COMPLETADA'].includes(item.estado)) return res.status(409).json({ error: 'Esta matrícula ya fue aceptada' });
+    if (item.estado === 'OBSERVADA') return res.status(409).json({ error: 'El colegio debe resolver la solicitud de corrección antes de aceptar la matrícula' });
     if (!item.campana_activa || !dentroDeCampana(item)) return res.status(410).json({ error: 'La campaña de matrícula no se encuentra habilitada en este momento.' });
     if (new Date(item.invitacion_vence_en) < new Date() || new Date(item.otp_vence_en) < new Date()) return res.status(410).json({ error: 'El código venció. Solicite una nueva invitación.' });
     if (Number(item.otp_intentos) >= 5) return res.status(429).json({ error: 'Se agotaron los intentos. Solicite una nueva invitación.' });
@@ -240,7 +246,10 @@ async function aceptar(req, res) {
     if (aceptaciones.compromiso_institucional !== true) return res.status(400).json({ error: 'Debe aceptar el compromiso con la formación del estudiante' });
     if (!aceptaciones.uso_imagen_decision) return res.status(400).json({ error: 'Indique si autoriza o no el uso institucional de imagen' });
     if (aceptaciones.declaracion !== true) return res.status(400).json({ error: 'Debe confirmar la declaración final' });
-    const formulario = req.body.formulario || {};
+    const formularioRecibido = req.body.formulario || {};
+    const borradorVerificado = json(item.borrador_asistido, {});
+    if (!Object.keys(borradorVerificado).length) return res.status(409).json({ error: 'El colegio debe preparar y verificar los datos oficiales antes de la aceptación' });
+    const formulario = { ...formularioRecibido, ...Object.fromEntries(CAMPOS_VERIFICADOS_COLEGIO.map((campo) => [campo, borradorVerificado[campo]])) };
     const autorizado = formulario.persona_autorizada_1 || {};
     if (!String(formulario.alumno_apellido_paterno || '').trim() || !String(formulario.alumno_apellido_materno || '').trim() || !String(formulario.alumno_nombres || '').trim() || !String(formulario.alumno_fecha_nacimiento || '').trim() || !String(formulario.alumno_sexo || '').trim()) return res.status(400).json({ error: 'Complete los datos personales obligatorios del estudiante' });
     if (!/^\d{8}$/.test(String(formulario.alumno_dni || ''))) return res.status(400).json({ error: 'El DNI del estudiante debe contener exactamente 8 dígitos' });
@@ -269,6 +278,18 @@ async function aceptar(req, res) {
   }
 }
 
+async function solicitarCorreccion(req, res) {
+  try {
+    const tokenHash = sha256(req.params.token);
+    const observacion = String(req.body.observacion || '').trim().slice(0, 1000);
+    if (observacion.length < 10) return res.status(400).json({ error: 'Describa con claridad el dato que debe corregirse' });
+    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET estado='OBSERVADA',observacion_revision=$1,actualizado_en=NOW() WHERE token_hash=$2 AND estado IN ('ENVIADA','ABIERTA','OBSERVADA') RETURNING id,codigo,estado`, observacion, tokenHash);
+    if (!rows[0]) return res.status(409).json({ error: 'La matrícula ya no admite solicitudes de corrección' });
+    await registrarEvento(rows[0].id, 'CORRECCION_SOLICITADA_POR_APODERADO', { observacion }, req);
+    res.json({ data: rows[0] });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo registrar la solicitud de corrección' }); }
+}
+
 async function detalle(req, res) {
   try {
     const rows = await prisma.$queryRawUnsafe(`SELECT md.*,ae.anio FROM "tbl_matriculas_digitales" md JOIN "tbl_anios_escolares" ae ON ae.id=md.id_anio_escolar WHERE md.id=$1`, Number(req.params.id));
@@ -293,7 +314,7 @@ async function guardarBorradorAsistido(req, res) {
     const matriculaId = Number(req.params.id);
     if (!Number.isInteger(matriculaId) || matriculaId <= 0) return res.status(400).json({ error: 'Matrícula inválida' });
     const borrador = limpiarBorradorAsistido(req.body.borrador || {});
-    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET borrador_asistido=$1::jsonb,borrador_preparado_por=$2,borrador_preparado_en=NOW(),actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 AND estado IN ('ENVIADA','ABIERTA','OBSERVADA') RETURNING id,codigo,borrador_asistido,borrador_preparado_en`, JSON.stringify(borrador), req.user.id, matriculaId);
+    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET borrador_asistido=$1::jsonb,borrador_preparado_por=$2,borrador_preparado_en=NOW(),estado=CASE WHEN estado='OBSERVADA' THEN 'ABIERTA' ELSE estado END,observacion_revision=CASE WHEN estado='OBSERVADA' THEN NULL ELSE observacion_revision END,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 AND estado IN ('ENVIADA','ABIERTA','OBSERVADA') RETURNING id,codigo,estado,borrador_asistido,borrador_preparado_en`, JSON.stringify(borrador), req.user.id, matriculaId);
     if (!rows[0]) return res.status(409).json({ error: 'Solo puede preparar matrículas pendientes de aceptación' });
     await registrarEvento(matriculaId, 'BORRADOR_ASISTIDO_PREPARADO', {}, req, req.user.id);
     await registrarAuditoria({ userId: req.user.id, accion: 'PREPARAR_BORRADOR_MATRICULA', tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matriculaId, resumen: `Borrador asistido de ${rows[0].codigo}`, req });
@@ -334,5 +355,5 @@ async function revisar(req, res) {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo revisar la matrícula' }); }
 }
 
-module.exports = { bootstrap, guardarConfiguracion, invitar, obtenerPublica, aceptar, detalle, guardarBorradorAsistido, guardarControlDocumental, revisar };
+module.exports = { bootstrap, guardarConfiguracion, invitar, obtenerPublica, aceptar, solicitarCorreccion, detalle, guardarBorradorAsistido, guardarControlDocumental, revisar };
 

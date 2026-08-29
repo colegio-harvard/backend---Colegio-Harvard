@@ -9,6 +9,7 @@ const soloGestion = [verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN')];
 
 router.get('/publica/:token', createRateLimiter({ windowMs: 15 * 60 * 1000, max: 80, keyPrefix: 'matricula-publica' }), ctrl.obtenerPublica);
 router.post('/publica/:token/aceptar', createRateLimiter({ windowMs: 15 * 60 * 1000, max: 12, keyPrefix: 'matricula-otp' }), ctrl.aceptar);
+router.post('/publica/:token/solicitar-correccion', createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyPrefix: 'matricula-correccion' }), ctrl.solicitarCorreccion);
 router.get('/bootstrap', ...soloGestion, ctrl.bootstrap);
 router.put('/configuracion', ...soloGestion, ctrl.guardarConfiguracion);
 router.post('/invitar', ...soloGestion, ctrl.invitar);
