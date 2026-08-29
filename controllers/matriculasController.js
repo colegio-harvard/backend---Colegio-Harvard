@@ -235,7 +235,7 @@ async function aceptar(req, res) {
     if (aceptaciones.declaracion !== true) return res.status(400).json({ error: 'Debe confirmar la declaración final' });
     const formulario = req.body.formulario || {};
     const autorizado = formulario.persona_autorizada_1 || {};
-    if (!String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim() || !String(formulario.centro_salud_emergencia || '').trim()) return res.status(400).json({ error: 'Complete celular, dirección, contacto de emergencia y centro de salud' });
+    if (!String(formulario.vinculo_representante || '').trim() || !String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim() || !String(formulario.centro_salud_emergencia || '').trim()) return res.status(400).json({ error: 'Complete vínculo del representante, celular, dirección, contacto de emergencia y centro de salud' });
     if (!String(autorizado.nombre || '').trim() || !String(autorizado.dni || '').trim() || !String(autorizado.parentesco || '').trim() || !String(autorizado.celular || '').trim()) return res.status(400).json({ error: 'Registre por lo menos una persona autorizada con nombre, DNI, parentesco y celular' });
     const aceptadoEn = new Date();
     const evidencia = { codigo: item.codigo, datos: json(item.datos_snapshot, {}), formulario, documentos, aceptaciones, aceptado_en: aceptadoEn.toISOString() };
