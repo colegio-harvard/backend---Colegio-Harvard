@@ -242,6 +242,9 @@ async function aceptar(req, res) {
     if (aceptaciones.declaracion !== true) return res.status(400).json({ error: 'Debe confirmar la declaración final' });
     const formulario = req.body.formulario || {};
     const autorizado = formulario.persona_autorizada_1 || {};
+    if (!String(formulario.alumno_apellido_paterno || '').trim() || !String(formulario.alumno_apellido_materno || '').trim() || !String(formulario.alumno_nombres || '').trim() || !String(formulario.alumno_fecha_nacimiento || '').trim() || !String(formulario.alumno_sexo || '').trim()) return res.status(400).json({ error: 'Complete los datos personales obligatorios del estudiante' });
+    if (!/^\d{8}$/.test(String(formulario.alumno_dni || ''))) return res.status(400).json({ error: 'El DNI del estudiante debe contener exactamente 8 dígitos' });
+    if (formulario.alumno_requiere_cuidado_especial === 'SI' && !String(formulario.alumno_detalle_cuidado_especial || '').trim()) return res.status(400).json({ error: 'Describa el cuidado especial que requiere el estudiante' });
     if (!String(formulario.representante_apellido_paterno || '').trim() || !String(formulario.representante_apellido_materno || '').trim() || !String(formulario.representante_nombres || '').trim() || !String(formulario.vinculo_representante || '').trim() || !String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim() || !String(formulario.centro_salud_emergencia || '').trim()) return res.status(400).json({ error: 'Complete los datos del representante legal y los datos obligatorios de emergencia' });
     if (!/^\d{8}$/.test(String(formulario.representante_dni || ''))) return res.status(400).json({ error: 'El DNI del representante debe contener exactamente 8 dígitos' });
     const personaPrincipal = formulario.persona_autorizada_1 || {};
@@ -276,7 +279,7 @@ async function detalle(req, res) {
 }
 
 function limpiarBorradorAsistido(input = {}) {
-  const campos = ['representante_apellido_paterno', 'representante_apellido_materno', 'representante_nombres', 'representante_dni', 'vinculo_representante', 'celular', 'email', 'direccion', 'contacto_emergencia', 'telefono_emergencia', 'centro_salud_emergencia', 'observaciones_salud', 'tipo_ingreso', 'condicion_promocion', 'anio_escolar_anterior', 'nivel_anterior', 'grado_anterior', 'institucion_procedencia', 'codigo_modular_procedencia', 'ubicacion_procedencia'];
+  const campos = ['alumno_apellido_paterno', 'alumno_apellido_materno', 'alumno_nombres', 'alumno_dni', 'alumno_fecha_nacimiento', 'alumno_sexo', 'alumno_pais_origen', 'alumno_ubicacion_origen', 'alumno_requiere_cuidado_especial', 'alumno_detalle_cuidado_especial', 'representante_apellido_paterno', 'representante_apellido_materno', 'representante_nombres', 'representante_dni', 'vinculo_representante', 'celular', 'email', 'direccion', 'contacto_emergencia', 'telefono_emergencia', 'centro_salud_emergencia', 'observaciones_salud', 'tipo_ingreso', 'condicion_promocion', 'anio_escolar_anterior', 'nivel_anterior', 'grado_anterior', 'institucion_procedencia', 'codigo_modular_procedencia', 'ubicacion_procedencia'];
   const limpio = Object.fromEntries(campos.map((campo) => [campo, String(input[campo] || '').trim().slice(0, 500)]));
   for (const clave of ['persona_autorizada_1', 'persona_autorizada_2']) {
     const persona = input[clave] || {};
