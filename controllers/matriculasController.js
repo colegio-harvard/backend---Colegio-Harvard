@@ -244,6 +244,8 @@ async function aceptar(req, res) {
     const autorizado = formulario.persona_autorizada_1 || {};
     if (!String(formulario.representante_apellido_paterno || '').trim() || !String(formulario.representante_apellido_materno || '').trim() || !String(formulario.representante_nombres || '').trim() || !String(formulario.vinculo_representante || '').trim() || !String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim() || !String(formulario.centro_salud_emergencia || '').trim()) return res.status(400).json({ error: 'Complete los datos del representante legal y los datos obligatorios de emergencia' });
     if (!/^\d{8}$/.test(String(formulario.representante_dni || ''))) return res.status(400).json({ error: 'El DNI del representante debe contener exactamente 8 dígitos' });
+    const personaPrincipal = formulario.persona_autorizada_1 || {};
+    if (!String(personaPrincipal.nombre || '').trim() || !String(personaPrincipal.parentesco || '').trim() || !String(personaPrincipal.celular || '').trim() || !/^\d{8}$/.test(String(personaPrincipal.dni || ''))) return res.status(400).json({ error: 'Complete nombre, DNI de 8 dígitos, parentesco y celular de la persona principal autorizada para recoger al estudiante' });
     const tiposIngreso = ['PROMOCION_INTERNA', 'TRASLADO', 'INGRESO_INICIAL', 'REPITENCIA'];
     const condicionesPromocion = ['PROMOVIDO', 'REPITE', 'PENDIENTE'];
     if (!tiposIngreso.includes(formulario.tipo_ingreso)) return res.status(400).json({ error: 'Seleccione el tipo de ingreso del estudiante' });
