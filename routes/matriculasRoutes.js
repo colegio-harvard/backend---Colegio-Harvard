@@ -12,6 +12,7 @@ router.post('/publica/:token/aceptar', createRateLimiter({ windowMs: 15 * 60 * 1
 router.post('/publica/:token/solicitar-correccion', createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyPrefix: 'matricula-correccion' }), ctrl.solicitarCorreccion);
 router.get('/bootstrap', ...soloGestion, ctrl.bootstrap);
 router.put('/configuracion', ...soloGestion, ctrl.guardarConfiguracion);
+router.post('/preparar', ...soloGestion, ctrl.preparar);
 router.post('/invitar', ...soloGestion, ctrl.invitar);
 router.get('/:id', ...soloGestion, ctrl.detalle);
 router.put('/:id/borrador-asistido', ...soloGestion, ctrl.guardarBorradorAsistido);

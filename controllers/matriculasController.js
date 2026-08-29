@@ -78,7 +78,7 @@ async function bootstrap(req, res) {
           p.id id_padre,p.nombre_completo apoderado,p.dni dni_apoderado,p.celular,
           g.nombre grado,a.seccion,n.nombre nivel,
           md.id id_matricula,md.codigo,md.estado estado_matricula,md.creado_en,md.aceptado_en,
-          md.deuda_snapshot,md.costo_matricula_snapshot,md.observacion_revision,
+          md.deuda_snapshot,md.costo_matricula_snapshot,md.observacion_revision,md.borrador_preparado_en,
           COALESCE(deuda.total,0)::numeric deuda_actual
         FROM "tbl_alumnos" al
         JOIN "tbl_aulas" a ON a.id=al.id_aula
@@ -128,6 +128,45 @@ async function guardarConfiguracion(req, res) {
   }
 }
 
+async function preparar(req, res) {
+  try {
+    const anio = await anioActivo();
+    if (!anio) return res.status(400).json({ error: 'No hay año escolar activo' });
+    const idAlumno = Number(req.body.id_alumno);
+    const datos = await prisma.$queryRawUnsafe(`
+      SELECT al.id,al.codigo_alumno,al.nombre_completo,al.dni,al.monto_matricula,
+        p.id id_padre,p.nombre_completo apoderado,p.dni dni_apoderado,p.celular,
+        g.nombre grado,a.seccion,n.nombre nivel
+      FROM "tbl_alumnos" al
+      JOIN "tbl_aulas" a ON a.id=al.id_aula JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_niveles" n ON n.id=g.id_nivel
+      JOIN "tbl_padres_alumnos" pa ON pa.id_alumno=al.id JOIN "tbl_padres" p ON p.id=pa.id_padre
+      WHERE al.id=$1 AND al.estado='ACTIVO'`, idAlumno);
+    if (!datos[0]) return res.status(404).json({ error: 'El alumno activo debe tener un apoderado vinculado' });
+    const existente = await prisma.$queryRawUnsafe(`SELECT id,estado FROM "tbl_matriculas_digitales" WHERE id_anio_escolar=$1 AND id_alumno=$2`, anio.id, idAlumno);
+    if (existente[0]) return res.json({ data: { id: existente[0].id, estado: existente[0].estado } });
+
+    const alumno = datos[0];
+    const deuda = await obtenerDeuda(idAlumno);
+    const configRows = await prisma.$queryRawUnsafe(`SELECT * FROM "tbl_config_matricula" WHERE id_anio_escolar=$1`, anio.id);
+    const config = configRows[0] || { documentos_json: DOCUMENTOS_BASE, version_documentos: '1.0', enlace_documentos: null };
+    const snapshot = { alumno: { id: alumno.id, codigo: alumno.codigo_alumno, nombre: alumno.nombre_completo, dni: alumno.dni, nivel: alumno.nivel, grado: alumno.grado, seccion: alumno.seccion }, apoderado: { id: alumno.id_padre, nombre: alumno.apoderado, dni: alumno.dni_apoderado, celular: alumno.celular }, anio: anio.anio };
+    const documentos = documentosConfigurados(config).map((d) => ({ ...d, version: config.version_documentos || '1.0', enlace: config.enlace_documentos || null }));
+    const rows = await prisma.$queryRawUnsafe(`
+      INSERT INTO "tbl_matriculas_digitales" ("id_anio_escolar","id_alumno","id_padre","estado","datos_snapshot","documentos_snapshot","deuda_snapshot","costo_matricula_snapshot","creado_por")
+      VALUES ($1,$2,$3,'BORRADOR',$4::jsonb,$5::jsonb,$6,$7,$8) RETURNING *`,
+      anio.id, idAlumno, alumno.id_padre, JSON.stringify(snapshot), JSON.stringify(documentos), deuda, Number(alumno.monto_matricula || 0), req.user.id);
+    const matricula = rows[0];
+    const codigo = `M${anio.anio}-${String(matricula.id).padStart(5, '0')}`;
+    await prisma.$executeRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET codigo=$1 WHERE id=$2`, codigo, matricula.id);
+    await registrarEvento(matricula.id, 'EXPEDIENTE_PREPARADO_POR_COLEGIO', {}, req, req.user.id);
+    await registrarAuditoria({ userId: req.user.id, accion: 'PREPARAR_MATRICULA_DIGITAL', tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matricula.id, resumen: `Expediente ${codigo} preparado para ${alumno.nombre_completo}`, req });
+    res.status(201).json({ data: { id: matricula.id, codigo, estado: 'BORRADOR' } });
+  } catch (error) {
+    console.error('Error al preparar matrícula:', error);
+    res.status(500).json({ error: 'No se pudo preparar el expediente de matrícula' });
+  }
+}
+
 async function invitar(req, res) {
   try {
     const anio = await anioActivo();
@@ -147,8 +186,13 @@ async function invitar(req, res) {
     if (!config?.activo) return res.status(409).json({ error: 'Configure y active primero la campaña de matrícula' });
     if (!dentroDeCampana(config)) return res.status(409).json({ error: 'La campaña de matrícula está fuera de sus fechas de inicio y cierre' });
     const matriculasExistentes = await prisma.$queryRawUnsafe(`
-      SELECT id,estado FROM "tbl_matriculas_digitales"
+      SELECT id,estado,borrador_preparado_en,borrador_asistido FROM "tbl_matriculas_digitales"
       WHERE id_anio_escolar=$1 AND id_alumno=$2`, anio.id, idAlumno);
+    if (!matriculasExistentes[0]) return res.status(409).json({ error: 'Primero use Cargar datos y guarde la información oficial de la matrícula' });
+    if (!matriculasExistentes[0].borrador_preparado_en) return res.status(409).json({ error: 'Complete y guarde los datos oficiales antes de generar la invitación' });
+    const borradorOficial = json(matriculasExistentes[0].borrador_asistido, {});
+    const obligatoriosColegio = ['alumno_apellido_paterno','alumno_nombres','alumno_dni','alumno_fecha_nacimiento','alumno_sexo','representante_apellido_paterno','representante_nombres','representante_dni','vinculo_representante','tipo_ingreso'];
+    if (obligatoriosColegio.some((campo) => !String(borradorOficial[campo] || '').trim())) return res.status(409).json({ error: 'Faltan datos oficiales obligatorios. Abra Cargar datos y complete la identificación y situación académica.' });
     if (['ACEPTADA', 'COMPLETADA'].includes(matriculasExistentes[0]?.estado)) {
       return res.status(409).json({ error: 'La matrícula ya fue aceptada. Abra el expediente para revisarla; no necesita reenviar la invitación.' });
     }
@@ -314,7 +358,7 @@ async function guardarBorradorAsistido(req, res) {
     const matriculaId = Number(req.params.id);
     if (!Number.isInteger(matriculaId) || matriculaId <= 0) return res.status(400).json({ error: 'Matrícula inválida' });
     const borrador = limpiarBorradorAsistido(req.body.borrador || {});
-    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET borrador_asistido=$1::jsonb,borrador_preparado_por=$2,borrador_preparado_en=NOW(),estado=CASE WHEN estado='OBSERVADA' THEN 'ABIERTA' ELSE estado END,observacion_revision=CASE WHEN estado='OBSERVADA' THEN NULL ELSE observacion_revision END,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 AND estado IN ('ENVIADA','ABIERTA','OBSERVADA') RETURNING id,codigo,estado,borrador_asistido,borrador_preparado_en`, JSON.stringify(borrador), req.user.id, matriculaId);
+    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET borrador_asistido=$1::jsonb,borrador_preparado_por=$2,borrador_preparado_en=NOW(),estado=CASE WHEN estado='OBSERVADA' THEN 'ABIERTA' ELSE estado END,observacion_revision=CASE WHEN estado='OBSERVADA' THEN NULL ELSE observacion_revision END,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 AND estado IN ('BORRADOR','ENVIADA','ABIERTA','OBSERVADA') RETURNING id,codigo,estado,borrador_asistido,borrador_preparado_en`, JSON.stringify(borrador), req.user.id, matriculaId);
     if (!rows[0]) return res.status(409).json({ error: 'Solo puede preparar matrículas pendientes de aceptación' });
     await registrarEvento(matriculaId, 'BORRADOR_ASISTIDO_PREPARADO', {}, req, req.user.id);
     await registrarAuditoria({ userId: req.user.id, accion: 'PREPARAR_BORRADOR_MATRICULA', tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matriculaId, resumen: `Borrador asistido de ${rows[0].codigo}`, req });
@@ -355,5 +399,5 @@ async function revisar(req, res) {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo revisar la matrícula' }); }
 }
 
-module.exports = { bootstrap, guardarConfiguracion, invitar, obtenerPublica, aceptar, solicitarCorreccion, detalle, guardarBorradorAsistido, guardarControlDocumental, revisar };
+module.exports = { bootstrap, guardarConfiguracion, preparar, invitar, obtenerPublica, aceptar, solicitarCorreccion, detalle, guardarBorradorAsistido, guardarControlDocumental, revisar };
 
