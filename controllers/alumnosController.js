@@ -441,6 +441,134 @@ const eliminar = async (req, res) => {
   }
 };
 
+const TABLAS_DIRECTAS_ALUMNO = new Set([
+  'tbl_padres_alumnos', 'tbl_carnets', 'tbl_eventos_asistencia', 'tbl_asistencia_dia',
+  'tbl_alertas', 'tbl_entradas_agenda', 'tbl_reportes_semanales', 'tbl_hilos_mensaje',
+  'tbl_estado_pension', 'tbl_notas_academicas', 'tbl_notas_conducta', 'tbl_notas_padre',
+  'tbl_observaciones_libreta', 'tbl_matriculas_digitales',
+]);
+
+const obtenerInventarioEliminacion = async (db, id) => {
+  const alumnos = await db.$queryRawUnsafe(`
+    SELECT al.id,al.codigo_alumno,al.nombre_completo,al.dni,al.estado,pa.id_padre,
+      (SELECT COUNT(*)::int FROM "tbl_padres_alumnos" hermanos WHERE hermanos.id_padre=pa.id_padre AND hermanos.id_alumno<>al.id) otros_alumnos_apoderado
+    FROM "tbl_alumnos" al LEFT JOIN "tbl_padres_alumnos" pa ON pa.id_alumno=al.id
+    WHERE al.id=$1`, id);
+  if (!alumnos.length) return null;
+
+  const filas = await db.$queryRawUnsafe(`
+    SELECT 'Vínculo con apoderado' nombre, COUNT(*)::int cantidad FROM "tbl_padres_alumnos" WHERE id_alumno=$1
+    UNION ALL SELECT 'Carnet',COUNT(*)::int FROM "tbl_carnets" WHERE id_alumno=$1
+    UNION ALL SELECT 'Eventos de asistencia',COUNT(*)::int FROM "tbl_eventos_asistencia" WHERE id_alumno=$1
+    UNION ALL SELECT 'Registros diarios de asistencia',COUNT(*)::int FROM "tbl_asistencia_dia" WHERE id_alumno=$1
+    UNION ALL SELECT 'Correcciones de asistencia',COUNT(*)::int FROM "tbl_correcciones_asistencia" WHERE id_asistencia_dia IN (SELECT id FROM "tbl_asistencia_dia" WHERE id_alumno=$1)
+    UNION ALL SELECT 'Alertas',COUNT(*)::int FROM "tbl_alertas" WHERE id_alumno=$1
+    UNION ALL SELECT 'Entradas de agenda exclusivas',COUNT(*)::int FROM "tbl_entradas_agenda" WHERE id_alumno=$1
+    UNION ALL SELECT 'Reportes semanales exclusivos',COUNT(*)::int FROM "tbl_reportes_semanales" WHERE id_alumno=$1
+    UNION ALL SELECT 'Conversaciones y mensajes',COUNT(*)::int FROM "tbl_hilos_mensaje" WHERE id_alumno=$1
+    UNION ALL SELECT 'Mensajes de conversaciones',COUNT(*)::int FROM "tbl_mensajes" WHERE id_hilo IN (SELECT id FROM "tbl_hilos_mensaje" WHERE id_alumno=$1)
+    UNION ALL SELECT 'Estados y movimientos de pensión',COUNT(*)::int FROM "tbl_estado_pension" WHERE id_alumno=$1
+    UNION ALL SELECT 'Pagos de pensión',COUNT(*)::int FROM "tbl_pagos_pension" WHERE id_estado_pension IN (SELECT id FROM "tbl_estado_pension" WHERE id_alumno=$1)
+    UNION ALL SELECT 'Compromisos de pago',COUNT(*)::int FROM "tbl_compromisos_pago" WHERE id_estado_pension IN (SELECT id FROM "tbl_estado_pension" WHERE id_alumno=$1)
+    UNION ALL SELECT 'Envíos de cobranza',COUNT(*)::int FROM "tbl_cobranza_envios" WHERE id_estado_pension IN (SELECT id FROM "tbl_estado_pension" WHERE id_alumno=$1)
+    UNION ALL SELECT 'Notas académicas',COUNT(*)::int FROM "tbl_notas_academicas" WHERE id_alumno=$1
+    UNION ALL SELECT 'Auditorías de notas',COUNT(*)::int FROM "tbl_auditoria_notas" WHERE id_nota IN (SELECT id FROM "tbl_notas_academicas" WHERE id_alumno=$1)
+    UNION ALL SELECT 'Notas de conducta',COUNT(*)::int FROM "tbl_notas_conducta" WHERE id_alumno=$1
+    UNION ALL SELECT 'Notas para la familia',COUNT(*)::int FROM "tbl_notas_padre" WHERE id_alumno=$1
+    UNION ALL SELECT 'Observaciones de libreta',COUNT(*)::int FROM "tbl_observaciones_libreta" WHERE id_alumno=$1
+    UNION ALL SELECT 'Expedientes de matrícula digital',COUNT(*)::int FROM "tbl_matriculas_digitales" WHERE id_alumno=$1
+    UNION ALL SELECT 'Eventos de matrícula digital',COUNT(*)::int FROM "tbl_eventos_matricula" WHERE id_matricula IN (SELECT id FROM "tbl_matriculas_digitales" WHERE id_alumno=$1)`, id);
+
+  const referencias = await db.$queryRawUnsafe(`
+    SELECT DISTINCT c.relname AS tabla
+    FROM pg_constraint fk
+    JOIN pg_class c ON c.oid=fk.conrelid
+    JOIN pg_class p ON p.oid=fk.confrelid
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE fk.contype='f' AND p.relname='tbl_alumnos' AND n.nspname='public'`);
+  const noContempladas = referencias.map((r) => r.tabla).filter((tabla) => !TABLAS_DIRECTAS_ALUMNO.has(tabla));
+  return {
+    alumno: alumnos[0],
+    registros: filas.filter((fila) => Number(fila.cantidad) > 0),
+    total_registros: filas.reduce((total, fila) => total + Number(fila.cantidad), 0),
+    conserva: {
+      apoderado: Boolean(alumnos[0].id_padre),
+      credenciales_apoderado: Boolean(alumnos[0].id_padre),
+      otros_alumnos_apoderado: Number(alumnos[0].otros_alumnos_apoderado || 0),
+    },
+    relaciones_no_contempladas: noContempladas,
+  };
+};
+
+const inventarioEliminacionPermanente = async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID de alumno inválido' });
+  try {
+    const inventario = await obtenerInventarioEliminacion(prisma, id);
+    if (!inventario) return res.status(404).json({ error: 'Alumno no encontrado' });
+    res.json({ data: inventario });
+  } catch (error) {
+    console.error('Error al inventariar eliminación permanente:', error);
+    res.status(500).json({ error: 'No se pudo preparar la eliminación permanente' });
+  }
+};
+
+const eliminarPermanentemente = async (req, res) => {
+  const id = Number(req.params.id);
+  const codigoConfirmacion = String(req.body.codigo_confirmacion || '').trim();
+  const motivo = String(req.body.motivo || '').trim();
+  const contrasena = String(req.body.contrasena || '');
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID de alumno inválido' });
+  if (motivo.length < 10 || motivo.length > 500) return res.status(400).json({ error: 'Indique un motivo de 10 a 500 caracteres' });
+  if (!contrasena) return res.status(400).json({ error: 'Debe confirmar su contraseña' });
+
+  try {
+    const actor = await prisma.tbl_usuarios.findUnique({ where: { id: req.user.id }, select: { contrasena: true, estado: true } });
+    if (!actor || actor.estado !== 'ACTIVO' || !(await bcrypt.compare(contrasena, actor.contrasena))) {
+      await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINACION_PERMANENTE_RECHAZADA', tipoEntidad: 'tbl_alumnos', idEntidad: id, resumen: `Confirmación de identidad fallida para eliminar alumno ${id}`, req });
+      return res.status(401).json({ error: 'Contraseña incorrecta' });
+    }
+
+    const resultado = await prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe('SELECT id FROM "tbl_alumnos" WHERE id=$1 FOR UPDATE', id);
+      const inventario = await obtenerInventarioEliminacion(tx, id);
+      if (!inventario) throw Object.assign(new Error('Alumno no encontrado'), { status: 404 });
+      if (codigoConfirmacion !== inventario.alumno.codigo_alumno) throw Object.assign(new Error('El código de confirmación no coincide'), { status: 409 });
+      if (inventario.relaciones_no_contempladas.length) throw Object.assign(new Error(`Existen relaciones no contempladas: ${inventario.relaciones_no_contempladas.join(', ')}`), { status: 409 });
+
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_correcciones_asistencia" WHERE id_asistencia_dia IN (SELECT id FROM "tbl_asistencia_dia" WHERE id_alumno=$1)', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_asistencia_dia" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_eventos_asistencia" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_alertas" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_entradas_agenda" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_reportes_semanales" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_hilos_mensaje" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_estado_pension" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_notas_academicas" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_notas_conducta" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_notas_padre" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_observaciones_libreta" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_matriculas_digitales" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_carnets" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_padres_alumnos" WHERE id_alumno=$1', id);
+      await tx.$executeRawUnsafe('DELETE FROM "tbl_alumnos" WHERE id=$1', id);
+      await tx.tbl_auditoria.create({ data: {
+        id_usuario_actor: req.user.id,
+        codigo_accion: 'ELIMINAR_ALUMNO_PERMANENTEMENTE',
+        tipo_entidad: 'tbl_alumnos',
+        id_entidad: id,
+        resumen: `Alumno ${inventario.alumno.codigo_alumno} eliminado permanentemente. Motivo: ${motivo}`,
+        meta_json: { codigo_alumno: inventario.alumno.codigo_alumno, motivo, registros_eliminados: inventario.registros, conservado: inventario.conserva },
+      } });
+      return inventario;
+    });
+    res.json({ data: { mensaje: 'Alumno eliminado permanentemente', eliminado: resultado.alumno.codigo_alumno, registros_eliminados: resultado.registros, conservado: resultado.conserva } });
+  } catch (error) {
+    console.error('Error al eliminar alumno permanentemente:', error);
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'La eliminación no se realizó; no se modificó ningún registro' });
+  }
+};
+
 // Subir foto del alumno (endpoint separado para cambiar foto existente)
 const subirFoto = async (req, res) => {
   const id = parseInt(req.params.id);
@@ -535,4 +663,4 @@ const reemitirCarnet = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al reemitir carnet' }); }
 };
 
-module.exports = { listar, obtenerPorId, siguienteCodigo, exportarAulasExcel, crear, actualizar, eliminar, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };
+module.exports = { listar, obtenerPorId, siguienteCodigo, exportarAulasExcel, crear, actualizar, eliminar, inventarioEliminacionPermanente, eliminarPermanentemente, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };

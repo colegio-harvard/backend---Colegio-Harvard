@@ -24,6 +24,8 @@ router.post('/', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), upload.si
 router.post('/vincular', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.vincularPadre);
 router.get('/carnet/:id_alumno', verificarToken, ctrl.obtenerCarnet);
 router.get('/:id/retiro', verificarToken, verificarRol('SUPER_ADMIN'), retirosCtrl.obtenerInfoRetiro);
+router.get('/:id/eliminacion-permanente', verificarToken, verificarRol('SUPER_ADMIN'), ctrl.inventarioEliminacionPermanente);
+router.post('/:id/eliminacion-permanente', verificarToken, verificarRol('SUPER_ADMIN'), ctrl.eliminarPermanentemente);
 router.post('/:id/retirar', verificarToken, verificarRol('SUPER_ADMIN'), retirosCtrl.retirar);
 router.post('/:id/reactivar', verificarToken, verificarRol('SUPER_ADMIN'), retirosCtrl.reactivar);
 router.delete('/desvincular/:id_alumno', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.desvincularPadre);
