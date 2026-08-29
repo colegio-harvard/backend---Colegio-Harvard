@@ -13,6 +13,7 @@ router.get('/bootstrap', ...soloGestion, ctrl.bootstrap);
 router.put('/configuracion', ...soloGestion, ctrl.guardarConfiguracion);
 router.post('/invitar', ...soloGestion, ctrl.invitar);
 router.get('/:id', ...soloGestion, ctrl.detalle);
+router.put('/:id/control-documental', ...soloGestion, ctrl.guardarControlDocumental);
 router.put('/:id/revisar', ...soloGestion, ctrl.revisar);
 
 module.exports = router;

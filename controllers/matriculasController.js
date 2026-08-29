@@ -261,8 +261,29 @@ async function detalle(req, res) {
     const rows = await prisma.$queryRawUnsafe(`SELECT md.*,ae.anio FROM "tbl_matriculas_digitales" md JOIN "tbl_anios_escolares" ae ON ae.id=md.id_anio_escolar WHERE md.id=$1`, Number(req.params.id));
     if (!rows[0]) return res.status(404).json({ error: 'Matrícula no encontrada' });
     const eventos = await prisma.$queryRawUnsafe(`SELECT * FROM "tbl_eventos_matricula" WHERE id_matricula=$1 ORDER BY creado_en`, Number(req.params.id));
-    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), eventos } });
+    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), control_documental: json(rows[0].control_documental, {}), eventos } });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo cargar el expediente' }); }
+}
+
+const DOCUMENTOS_CONTROL = new Set(['certificado_estudios', 'ficha_unica_matricula', 'libreta_anterior', 'dni_alumno', 'dni_apoderado', 'foto_alumno', 'foto_apoderado']);
+const ESTADOS_DOCUMENTO = new Set(['PENDIENTE', 'ENTREGADO', 'NO_APLICA']);
+
+async function guardarControlDocumental(req, res) {
+  try {
+    const matriculaId = Number(req.params.id);
+    if (!Number.isInteger(matriculaId) || matriculaId <= 0) return res.status(400).json({ error: 'Matrícula inválida' });
+    const recibido = req.body.control_documental || {};
+    const control = {};
+    for (const [clave, valor] of Object.entries(recibido)) {
+      if (!DOCUMENTOS_CONTROL.has(clave) || !ESTADOS_DOCUMENTO.has(valor?.estado)) return res.status(400).json({ error: 'Control documental inválido' });
+      control[clave] = { estado: valor.estado, observacion: String(valor.observacion || '').trim().slice(0, 500) || null, actualizado_en: new Date().toISOString(), actualizado_por: req.user.id };
+    }
+    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET control_documental=$1::jsonb,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 RETURNING id,codigo,control_documental`, JSON.stringify(control), req.user.id, matriculaId);
+    if (!rows[0]) return res.status(404).json({ error: 'Matrícula no encontrada' });
+    await registrarEvento(matriculaId, 'CONTROL_DOCUMENTAL_ACTUALIZADO', { documentos: Object.fromEntries(Object.entries(control).map(([clave, valor]) => [clave, valor.estado])) }, req, req.user.id);
+    await registrarAuditoria({ userId: req.user.id, accion: 'ACTUALIZAR_CONTROL_DOCUMENTAL', tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matriculaId, resumen: `Control documental de ${rows[0].codigo}`, req });
+    res.json({ data: { ...rows[0], control_documental: json(rows[0].control_documental, {}) } });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el control documental' }); }
 }
 
 async function revisar(req, res) {
@@ -277,5 +298,5 @@ async function revisar(req, res) {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo revisar la matrícula' }); }
 }
 
-module.exports = { bootstrap, guardarConfiguracion, invitar, obtenerPublica, aceptar, detalle, revisar };
+module.exports = { bootstrap, guardarConfiguracion, invitar, obtenerPublica, aceptar, detalle, guardarControlDocumental, revisar };
 
