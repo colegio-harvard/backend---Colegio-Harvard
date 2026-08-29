@@ -192,7 +192,9 @@ async function obtenerPublica(req, res) {
       await registrarEvento(item.id, 'INVITACION_ABIERTA', {}, req);
       item.estado = 'ABIERTA';
     }
-    res.json({ data: { codigo: item.codigo, estado: item.estado, anio: item.anio, datos: json(item.datos_snapshot, {}), formulario: json(item.datos_formulario, {}), documentos: json(item.documentos_snapshot, []), aceptaciones: json(item.aceptaciones_json, {}), deuda: Number(item.deuda_snapshot || 0), matricula: Number(item.costo_matricula_snapshot || 0), aceptado_en: item.aceptado_en, hash_evidencia: item.hash_evidencia, observacion_revision: item.observacion_revision } });
+    const borrador = json(item.borrador_asistido, {});
+    const formularioGuardado = json(item.datos_formulario, {});
+    res.json({ data: { codigo: item.codigo, estado: item.estado, anio: item.anio, datos: json(item.datos_snapshot, {}), formulario: { ...borrador, ...formularioGuardado }, preparado_por_colegio: Object.keys(borrador).length > 0, borrador_preparado_en: item.borrador_preparado_en, documentos: json(item.documentos_snapshot, []), aceptaciones: json(item.aceptaciones_json, {}), deuda: Number(item.deuda_snapshot || 0), matricula: Number(item.costo_matricula_snapshot || 0), aceptado_en: item.aceptado_en, hash_evidencia: item.hash_evidencia, observacion_revision: item.observacion_revision } });
   } catch (error) {
     console.error('Error consulta matrícula pública:', error);
     res.status(500).json({ error: 'No se pudo consultar la matrícula' });
@@ -261,8 +263,31 @@ async function detalle(req, res) {
     const rows = await prisma.$queryRawUnsafe(`SELECT md.*,ae.anio FROM "tbl_matriculas_digitales" md JOIN "tbl_anios_escolares" ae ON ae.id=md.id_anio_escolar WHERE md.id=$1`, Number(req.params.id));
     if (!rows[0]) return res.status(404).json({ error: 'Matrícula no encontrada' });
     const eventos = await prisma.$queryRawUnsafe(`SELECT * FROM "tbl_eventos_matricula" WHERE id_matricula=$1 ORDER BY creado_en`, Number(req.params.id));
-    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), control_documental: json(rows[0].control_documental, {}), eventos } });
+    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), borrador_asistido: json(rows[0].borrador_asistido, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), control_documental: json(rows[0].control_documental, {}), eventos } });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo cargar el expediente' }); }
+}
+
+function limpiarBorradorAsistido(input = {}) {
+  const campos = ['vinculo_representante', 'celular', 'email', 'direccion', 'contacto_emergencia', 'telefono_emergencia', 'centro_salud_emergencia', 'observaciones_salud', 'tipo_ingreso', 'condicion_promocion', 'anio_escolar_anterior', 'nivel_anterior', 'grado_anterior', 'institucion_procedencia', 'codigo_modular_procedencia', 'ubicacion_procedencia'];
+  const limpio = Object.fromEntries(campos.map((campo) => [campo, String(input[campo] || '').trim().slice(0, 500)]));
+  for (const clave of ['persona_autorizada_1', 'persona_autorizada_2']) {
+    const persona = input[clave] || {};
+    limpio[clave] = { nombre: String(persona.nombre || '').trim().slice(0, 200), dni: String(persona.dni || '').trim().slice(0, 20), parentesco: String(persona.parentesco || '').trim().slice(0, 80), celular: String(persona.celular || '').trim().slice(0, 30) };
+  }
+  return limpio;
+}
+
+async function guardarBorradorAsistido(req, res) {
+  try {
+    const matriculaId = Number(req.params.id);
+    if (!Number.isInteger(matriculaId) || matriculaId <= 0) return res.status(400).json({ error: 'Matrícula inválida' });
+    const borrador = limpiarBorradorAsistido(req.body.borrador || {});
+    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET borrador_asistido=$1::jsonb,borrador_preparado_por=$2,borrador_preparado_en=NOW(),actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 AND estado IN ('ENVIADA','ABIERTA','OBSERVADA') RETURNING id,codigo,borrador_asistido,borrador_preparado_en`, JSON.stringify(borrador), req.user.id, matriculaId);
+    if (!rows[0]) return res.status(409).json({ error: 'Solo puede preparar matrículas pendientes de aceptación' });
+    await registrarEvento(matriculaId, 'BORRADOR_ASISTIDO_PREPARADO', {}, req, req.user.id);
+    await registrarAuditoria({ userId: req.user.id, accion: 'PREPARAR_BORRADOR_MATRICULA', tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matriculaId, resumen: `Borrador asistido de ${rows[0].codigo}`, req });
+    res.json({ data: { ...rows[0], borrador_asistido: json(rows[0].borrador_asistido, {}) } });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el borrador asistido' }); }
 }
 
 const DOCUMENTOS_CONTROL = new Set(['certificado_estudios', 'ficha_unica_matricula', 'libreta_anterior', 'dni_alumno', 'dni_apoderado', 'foto_alumno', 'foto_apoderado']);
@@ -298,5 +323,5 @@ async function revisar(req, res) {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo revisar la matrícula' }); }
 }
 
-module.exports = { bootstrap, guardarConfiguracion, invitar, obtenerPublica, aceptar, detalle, guardarControlDocumental, revisar };
+module.exports = { bootstrap, guardarConfiguracion, invitar, obtenerPublica, aceptar, detalle, guardarBorradorAsistido, guardarControlDocumental, revisar };
 
