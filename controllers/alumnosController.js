@@ -237,7 +237,7 @@ const siguienteCodigo = async (_req, res) => {
 };
 
 const crear = async (req, res) => {
-  const { codigo_alumno, dni, nombre_completo, monto_matricula, monto_materiales, monto_pension, id_aula, padre_dni, padre_nombre, padre_celular, padre_username, padre_contrasena } = req.body;
+  const { codigo_alumno, dni, nombre_completo, apellido_paterno, apellido_materno, nombres, monto_matricula, monto_materiales, monto_pension, id_aula, padre_dni, padre_nombre, padre_celular, padre_username, padre_contrasena } = req.body;
 
   if (!nombre_completo || !id_aula) {
     return res.status(400).json({ error: 'Nombre y aula son obligatorios' });
@@ -282,6 +282,9 @@ const crear = async (req, res) => {
           codigo_alumno: codigoFinal,
           dni: dni || null,
           nombre_completo,
+          apellido_paterno: apellido_paterno?.trim() || null,
+          apellido_materno: apellido_materno?.trim() || null,
+          nombres: nombres?.trim() || null,
           monto_matricula: montoMatriculaValue ?? null,
           monto_materiales: montoMaterialesValue ?? null,
           monto_pension: montoPensionValue ?? null,
@@ -353,7 +356,7 @@ const crear = async (req, res) => {
 
 const actualizar = async (req, res) => {
   const id = parseInt(req.params.id);
-  const { nombre_completo, dni, monto_matricula, monto_materiales, monto_pension, id_aula, estado } = req.body;
+  const { nombre_completo, apellido_paterno, apellido_materno, nombres, dni, monto_matricula, monto_materiales, monto_pension, id_aula, estado } = req.body;
 
   try {
     const montoMatriculaValue = parseMonto(monto_matricula);
@@ -373,6 +376,9 @@ const actualizar = async (req, res) => {
 
     const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
     if (nombre_completo) data.nombre_completo = nombre_completo;
+    if (apellido_paterno !== undefined) data.apellido_paterno = apellido_paterno?.trim() || null;
+    if (apellido_materno !== undefined) data.apellido_materno = apellido_materno?.trim() || null;
+    if (nombres !== undefined) data.nombres = nombres?.trim() || null;
     if (dni !== undefined) data.dni = dni || null;
     if (montoMatriculaValue !== undefined) data.monto_matricula = montoMatriculaValue;
     if (montoMaterialesValue !== undefined) data.monto_materiales = montoMaterialesValue;

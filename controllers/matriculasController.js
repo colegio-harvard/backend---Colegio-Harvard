@@ -134,7 +134,7 @@ async function preparar(req, res) {
     if (!anio) return res.status(400).json({ error: 'No hay año escolar activo' });
     const idAlumno = Number(req.body.id_alumno);
     const datos = await prisma.$queryRawUnsafe(`
-      SELECT al.id,al.codigo_alumno,al.nombre_completo,al.dni,al.monto_matricula,
+      SELECT al.id,al.codigo_alumno,al.nombre_completo,al.apellido_paterno,al.apellido_materno,al.nombres,al.dni,al.monto_matricula,
         p.id id_padre,p.nombre_completo apoderado,p.dni dni_apoderado,p.celular,
         g.nombre grado,a.seccion,n.nombre nivel
       FROM "tbl_alumnos" al
@@ -149,7 +149,7 @@ async function preparar(req, res) {
     const deuda = await obtenerDeuda(idAlumno);
     const configRows = await prisma.$queryRawUnsafe(`SELECT * FROM "tbl_config_matricula" WHERE id_anio_escolar=$1`, anio.id);
     const config = configRows[0] || { documentos_json: DOCUMENTOS_BASE, version_documentos: '1.0', enlace_documentos: null };
-    const snapshot = { alumno: { id: alumno.id, codigo: alumno.codigo_alumno, nombre: alumno.nombre_completo, dni: alumno.dni, nivel: alumno.nivel, grado: alumno.grado, seccion: alumno.seccion }, apoderado: { id: alumno.id_padre, nombre: alumno.apoderado, dni: alumno.dni_apoderado, celular: alumno.celular }, anio: anio.anio };
+    const snapshot = { alumno: { id: alumno.id, codigo: alumno.codigo_alumno, nombre: alumno.nombre_completo, apellido_paterno: alumno.apellido_paterno, apellido_materno: alumno.apellido_materno, nombres: alumno.nombres, dni: alumno.dni, nivel: alumno.nivel, grado: alumno.grado, seccion: alumno.seccion }, apoderado: { id: alumno.id_padre, nombre: alumno.apoderado, dni: alumno.dni_apoderado, celular: alumno.celular }, anio: anio.anio };
     const documentos = documentosConfigurados(config).map((d) => ({ ...d, version: config.version_documentos || '1.0', enlace: config.enlace_documentos || null }));
     const rows = await prisma.$queryRawUnsafe(`
       INSERT INTO "tbl_matriculas_digitales" ("id_anio_escolar","id_alumno","id_padre","estado","datos_snapshot","documentos_snapshot","deuda_snapshot","costo_matricula_snapshot","creado_por")
@@ -173,7 +173,7 @@ async function invitar(req, res) {
     if (!anio) return res.status(400).json({ error: 'No hay año escolar activo' });
     const idAlumno = Number(req.body.id_alumno);
     const datos = await prisma.$queryRawUnsafe(`
-      SELECT al.id,al.codigo_alumno,al.nombre_completo,al.dni,al.monto_matricula,al.monto_materiales,al.monto_pension,
+      SELECT al.id,al.codigo_alumno,al.nombre_completo,al.apellido_paterno,al.apellido_materno,al.nombres,al.dni,al.monto_matricula,al.monto_materiales,al.monto_pension,
         p.id id_padre,p.nombre_completo apoderado,p.dni dni_apoderado,p.celular,
         g.nombre grado,a.seccion,n.nombre nivel
       FROM "tbl_alumnos" al
@@ -202,7 +202,7 @@ async function invitar(req, res) {
     const otp = String(crypto.randomInt(100000, 1000000));
     const tokenHash = sha256(token);
     const otpHash = sha256(`${token}:${otp}`);
-    const snapshot = { alumno: { id: alumno.id, codigo: alumno.codigo_alumno, nombre: alumno.nombre_completo, dni: alumno.dni, nivel: alumno.nivel, grado: alumno.grado, seccion: alumno.seccion }, apoderado: { id: alumno.id_padre, nombre: alumno.apoderado, dni: alumno.dni_apoderado, celular: alumno.celular }, anio: anio.anio };
+    const snapshot = { alumno: { id: alumno.id, codigo: alumno.codigo_alumno, nombre: alumno.nombre_completo, apellido_paterno: alumno.apellido_paterno, apellido_materno: alumno.apellido_materno, nombres: alumno.nombres, dni: alumno.dni, nivel: alumno.nivel, grado: alumno.grado, seccion: alumno.seccion }, apoderado: { id: alumno.id_padre, nombre: alumno.apoderado, dni: alumno.dni_apoderado, celular: alumno.celular }, anio: anio.anio };
     const documentos = documentosConfigurados(config).map((d) => ({ ...d, version: config.version_documentos, enlace: config.enlace_documentos }));
     const rows = await prisma.$queryRawUnsafe(`
       INSERT INTO "tbl_matriculas_digitales" ("id_anio_escolar","id_alumno","id_padre","estado","token_hash","otp_hash","otp_vence_en","invitacion_vence_en","datos_snapshot","documentos_snapshot","deuda_snapshot","costo_matricula_snapshot","creado_por")
