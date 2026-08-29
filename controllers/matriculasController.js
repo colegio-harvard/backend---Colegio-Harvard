@@ -12,6 +12,14 @@ const DOCUMENTOS_BASE = [
   { clave: 'imagen', nombre: 'Autorización de uso de imagen', obligatorio: false },
 ];
 const COMPROMISO_INSTITUCIONAL = 'Me comprometo a cumplir y promover las normas de la institución, enseñarlas y hacerlas respetar por el estudiante, involucrándome activamente en su proceso de aprendizaje y reconociendo que la educación es una responsabilidad compartida.';
+const AUTORIZACIONES = {
+  tratamiento_datos: 'Autorizo al Colegio Harvard a tratar los datos personales del representante legal y del estudiante para finalidades educativas, administrativas, estadísticas vinculadas al servicio y de cobranza. Los datos se conservarán durante la relación contractual y los plazos legales aplicables. He sido informado de que puedo ejercer mis derechos de acceso, rectificación, cancelación y oposición mediante los canales oficiales del colegio.',
+  comunicaciones_contractuales: 'Autorizo el envío de notificaciones físicas al domicilio y de comunicaciones al teléfono fijo, teléfono móvil y correo electrónico registrados, para formalizar la matrícula y realizar actos administrativos o contractuales relacionados con el servicio educativo.',
+  reporte_crediticio: 'Declaro haber sido informado y autorizo que, ante incumplimientos de pago y cuando corresponda conforme a la Ley N.° 27489, el colegio comunique información pertinente sobre la obligación y su historial de pago a centrales privadas de información de riesgos, respetando los límites y derechos establecidos por ley.',
+  emergencia_medica: 'Autorizo que, ante una emergencia y cuando no sea posible esperar instrucciones, el colegio traslade al estudiante al centro de salud declarado en esta ficha o al establecimiento disponible más cercano, comunicándolo al contacto de emergencia.',
+  comunicaciones_comerciales: 'Autorizo voluntariamente el uso de mis datos de contacto para recibir información comercial o promocional sobre servicios y actividades del Colegio Harvard. Puedo retirar esta autorización posteriormente sin afectar la matrícula ni el servicio educativo.',
+};
+const AUTORIZACIONES_OBLIGATORIAS = ['tratamiento_datos', 'comunicaciones_contractuales', 'reporte_crediticio', 'emergencia_medica'];
 const ESTADOS_REVISION = new Set(['OBSERVADA', 'COMPLETADA']);
 const sha256 = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
 const json = (value, fallback) => {
@@ -212,16 +220,22 @@ async function aceptar(req, res) {
     const aceptacionesRecibidas = req.body.aceptaciones || {};
     const aceptaciones = {
       ...aceptacionesRecibidas,
+      ...Object.fromEntries(Object.entries(AUTORIZACIONES).flatMap(([clave, texto]) => [
+        [clave, aceptacionesRecibidas[clave] === true],
+        [`${clave}_texto`, texto],
+      ])),
       compromiso_institucional: aceptacionesRecibidas.compromiso_institucional === true,
       compromiso_institucional_texto: COMPROMISO_INSTITUCIONAL,
     };
     const faltantes = documentos.filter((d) => d.obligatorio !== false && aceptaciones[d.clave] !== true);
     if (faltantes.length) return res.status(400).json({ error: 'Debe aceptar todos los documentos obligatorios' });
+    const autorizacionesFaltantes = AUTORIZACIONES_OBLIGATORIAS.filter((clave) => aceptaciones[clave] !== true);
+    if (autorizacionesFaltantes.length) return res.status(400).json({ error: 'Debe aceptar todas las autorizaciones obligatorias' });
     if (aceptaciones.compromiso_institucional !== true) return res.status(400).json({ error: 'Debe aceptar el compromiso con la formación del estudiante' });
     if (aceptaciones.declaracion !== true) return res.status(400).json({ error: 'Debe confirmar la declaración final' });
     const formulario = req.body.formulario || {};
     const autorizado = formulario.persona_autorizada_1 || {};
-    if (!String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim()) return res.status(400).json({ error: 'Complete celular, dirección y contacto de emergencia' });
+    if (!String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim() || !String(formulario.centro_salud_emergencia || '').trim()) return res.status(400).json({ error: 'Complete celular, dirección, contacto de emergencia y centro de salud' });
     if (!String(autorizado.nombre || '').trim() || !String(autorizado.dni || '').trim() || !String(autorizado.parentesco || '').trim() || !String(autorizado.celular || '').trim()) return res.status(400).json({ error: 'Registre por lo menos una persona autorizada con nombre, DNI, parentesco y celular' });
     const aceptadoEn = new Date();
     const evidencia = { codigo: item.codigo, datos: json(item.datos_snapshot, {}), formulario, documentos, aceptaciones, aceptado_en: aceptadoEn.toISOString() };
