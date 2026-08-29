@@ -3,15 +3,16 @@ const prisma = require('../config/prisma');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
 
 const DOCUMENTOS_BASE = [
+  { clave: 'acta_compromiso', nombre: 'Acta de compromiso y aceptación de las condiciones del servicio educativo', obligatorio: true },
   { clave: 'contrato', nombre: 'Contrato de prestación del servicio educativo', obligatorio: true },
   { clave: 'reglamento', nombre: 'Reglamento interno', obligatorio: true },
   { clave: 'economico', nombre: 'Condiciones y compromiso económico', obligatorio: true },
   { clave: 'datos', nombre: 'Tratamiento de datos personales', obligatorio: true },
   { clave: 'convivencia', nombre: 'Normas de convivencia escolar', obligatorio: true },
   { clave: 'emergencia', nombre: 'Ficha de emergencia y personas autorizadas para recoger al estudiante', obligatorio: true },
-  { clave: 'imagen', nombre: 'Autorización de uso de imagen', obligatorio: false },
 ];
 const COMPROMISO_INSTITUCIONAL = 'Me comprometo a cumplir y promover las normas de la institución, enseñarlas y hacerlas respetar por el estudiante, involucrándome activamente en su proceso de aprendizaje y reconociendo que la educación es una responsabilidad compartida.';
+const USO_IMAGEN_TEXTO = 'Autorización voluntaria para utilizar fotografías, grabaciones de audio o videos del estudiante con fines educativos, informativos o institucionales, respetando su dignidad, privacidad, integridad y bienestar. La negativa no afecta la matrícula ni la prestación del servicio educativo.';
 const AUTORIZACIONES = {
   tratamiento_datos: 'Autorizo al Colegio Harvard a tratar los datos personales del representante legal y del estudiante para finalidades educativas, administrativas, estadísticas vinculadas al servicio y de cobranza. Los datos se conservarán durante la relación contractual y los plazos legales aplicables. He sido informado de que puedo ejercer mis derechos de acceso, rectificación, cancelación y oposición mediante los canales oficiales del colegio.',
   comunicaciones_contractuales: 'Autorizo el envío de notificaciones físicas al domicilio y de comunicaciones al teléfono fijo, teléfono móvil y correo electrónico registrados, para formalizar la matrícula y realizar actos administrativos o contractuales relacionados con el servicio educativo.',
@@ -45,7 +46,8 @@ async function registrarEvento(idMatricula, evento, detalle, req, creadoPor = nu
 }
 
 function documentosConfigurados(config) {
-  const docs = json(config?.documentos_json, []);
+  const configurados = json(config?.documentos_json, []);
+  const docs = Array.isArray(configurados) ? configurados.filter((doc) => doc?.clave !== 'imagen') : [];
   if (!Array.isArray(docs) || !docs.length) return DOCUMENTOS_BASE;
   const claves = new Set(docs.map((doc) => doc.clave));
   return [...docs, ...DOCUMENTOS_BASE.filter((doc) => !claves.has(doc.clave))];
@@ -228,12 +230,15 @@ async function aceptar(req, res) {
       ])),
       compromiso_institucional: aceptacionesRecibidas.compromiso_institucional === true,
       compromiso_institucional_texto: COMPROMISO_INSTITUCIONAL,
+      uso_imagen_decision: ['AUTORIZO', 'NO_AUTORIZO'].includes(aceptacionesRecibidas.uso_imagen_decision) ? aceptacionesRecibidas.uso_imagen_decision : null,
+      uso_imagen_texto: USO_IMAGEN_TEXTO,
     };
     const faltantes = documentos.filter((d) => d.obligatorio !== false && aceptaciones[d.clave] !== true);
     if (faltantes.length) return res.status(400).json({ error: 'Debe aceptar todos los documentos obligatorios' });
     const autorizacionesFaltantes = AUTORIZACIONES_OBLIGATORIAS.filter((clave) => aceptaciones[clave] !== true);
     if (autorizacionesFaltantes.length) return res.status(400).json({ error: 'Debe aceptar todas las autorizaciones obligatorias' });
     if (aceptaciones.compromiso_institucional !== true) return res.status(400).json({ error: 'Debe aceptar el compromiso con la formación del estudiante' });
+    if (!aceptaciones.uso_imagen_decision) return res.status(400).json({ error: 'Indique si autoriza o no el uso institucional de imagen' });
     if (aceptaciones.declaracion !== true) return res.status(400).json({ error: 'Debe confirmar la declaración final' });
     const formulario = req.body.formulario || {};
     const autorizado = formulario.persona_autorizada_1 || {};
