@@ -11,6 +11,7 @@ const DOCUMENTOS_BASE = [
   { clave: 'emergencia', nombre: 'Ficha de emergencia y personas autorizadas para recoger al estudiante', obligatorio: true },
   { clave: 'imagen', nombre: 'Autorización de uso de imagen', obligatorio: false },
 ];
+const COMPROMISO_INSTITUCIONAL = 'Me comprometo a cumplir y promover las normas de la institución, enseñarlas y hacerlas respetar por el estudiante, involucrándome activamente en su proceso de aprendizaje y reconociendo que la educación es una responsabilidad compartida.';
 const ESTADOS_REVISION = new Set(['OBSERVADA', 'COMPLETADA']);
 const sha256 = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
 const json = (value, fallback) => {
@@ -208,9 +209,15 @@ async function aceptar(req, res) {
       return res.status(400).json({ error: 'Código incorrecto' });
     }
     const documentos = json(item.documentos_snapshot, []);
-    const aceptaciones = req.body.aceptaciones || {};
+    const aceptacionesRecibidas = req.body.aceptaciones || {};
+    const aceptaciones = {
+      ...aceptacionesRecibidas,
+      compromiso_institucional: aceptacionesRecibidas.compromiso_institucional === true,
+      compromiso_institucional_texto: COMPROMISO_INSTITUCIONAL,
+    };
     const faltantes = documentos.filter((d) => d.obligatorio !== false && aceptaciones[d.clave] !== true);
     if (faltantes.length) return res.status(400).json({ error: 'Debe aceptar todos los documentos obligatorios' });
+    if (aceptaciones.compromiso_institucional !== true) return res.status(400).json({ error: 'Debe aceptar el compromiso con la formación del estudiante' });
     if (aceptaciones.declaracion !== true) return res.status(400).json({ error: 'Debe confirmar la declaración final' });
     const formulario = req.body.formulario || {};
     const autorizado = formulario.persona_autorizada_1 || {};
