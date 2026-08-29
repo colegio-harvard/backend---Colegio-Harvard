@@ -242,7 +242,8 @@ async function aceptar(req, res) {
     if (aceptaciones.declaracion !== true) return res.status(400).json({ error: 'Debe confirmar la declaración final' });
     const formulario = req.body.formulario || {};
     const autorizado = formulario.persona_autorizada_1 || {};
-    if (!String(formulario.vinculo_representante || '').trim() || !String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim() || !String(formulario.centro_salud_emergencia || '').trim()) return res.status(400).json({ error: 'Complete vínculo del representante, celular, dirección, contacto de emergencia y centro de salud' });
+    if (!String(formulario.representante_apellido_paterno || '').trim() || !String(formulario.representante_apellido_materno || '').trim() || !String(formulario.representante_nombres || '').trim() || !String(formulario.vinculo_representante || '').trim() || !String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim() || !String(formulario.centro_salud_emergencia || '').trim()) return res.status(400).json({ error: 'Complete los datos del representante legal y los datos obligatorios de emergencia' });
+    if (!/^\d{8}$/.test(String(formulario.representante_dni || ''))) return res.status(400).json({ error: 'El DNI del representante debe contener exactamente 8 dígitos' });
     const tiposIngreso = ['PROMOCION_INTERNA', 'TRASLADO', 'INGRESO_INICIAL', 'REPITENCIA'];
     const condicionesPromocion = ['PROMOVIDO', 'REPITE', 'PENDIENTE'];
     if (!tiposIngreso.includes(formulario.tipo_ingreso)) return res.status(400).json({ error: 'Seleccione el tipo de ingreso del estudiante' });
@@ -273,7 +274,7 @@ async function detalle(req, res) {
 }
 
 function limpiarBorradorAsistido(input = {}) {
-  const campos = ['vinculo_representante', 'celular', 'email', 'direccion', 'contacto_emergencia', 'telefono_emergencia', 'centro_salud_emergencia', 'observaciones_salud', 'tipo_ingreso', 'condicion_promocion', 'anio_escolar_anterior', 'nivel_anterior', 'grado_anterior', 'institucion_procedencia', 'codigo_modular_procedencia', 'ubicacion_procedencia'];
+  const campos = ['representante_apellido_paterno', 'representante_apellido_materno', 'representante_nombres', 'representante_dni', 'vinculo_representante', 'celular', 'email', 'direccion', 'contacto_emergencia', 'telefono_emergencia', 'centro_salud_emergencia', 'observaciones_salud', 'tipo_ingreso', 'condicion_promocion', 'anio_escolar_anterior', 'nivel_anterior', 'grado_anterior', 'institucion_procedencia', 'codigo_modular_procedencia', 'ubicacion_procedencia'];
   const limpio = Object.fromEntries(campos.map((campo) => [campo, String(input[campo] || '').trim().slice(0, 500)]));
   for (const clave of ['persona_autorizada_1', 'persona_autorizada_2']) {
     const persona = input[clave] || {};
