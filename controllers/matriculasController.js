@@ -236,6 +236,13 @@ async function aceptar(req, res) {
     const formulario = req.body.formulario || {};
     const autorizado = formulario.persona_autorizada_1 || {};
     if (!String(formulario.vinculo_representante || '').trim() || !String(formulario.celular || '').trim() || !String(formulario.direccion || '').trim() || !String(formulario.contacto_emergencia || '').trim() || !String(formulario.centro_salud_emergencia || '').trim()) return res.status(400).json({ error: 'Complete vínculo del representante, celular, dirección, contacto de emergencia y centro de salud' });
+    const tiposIngreso = ['PROMOCION_INTERNA', 'TRASLADO', 'INGRESO_INICIAL', 'REPITENCIA'];
+    const condicionesPromocion = ['PROMOVIDO', 'REPITE', 'PENDIENTE'];
+    if (!tiposIngreso.includes(formulario.tipo_ingreso)) return res.status(400).json({ error: 'Seleccione el tipo de ingreso del estudiante' });
+    if (formulario.tipo_ingreso !== 'INGRESO_INICIAL') {
+      if (!condicionesPromocion.includes(formulario.condicion_promocion) || !/^\d{4}$/.test(String(formulario.anio_escolar_anterior || '')) || !String(formulario.nivel_anterior || '').trim() || !String(formulario.grado_anterior || '').trim()) return res.status(400).json({ error: 'Complete la condición de promoción y el antecedente escolar' });
+      if (formulario.tipo_ingreso === 'TRASLADO' && !String(formulario.institucion_procedencia || '').trim()) return res.status(400).json({ error: 'Indique la institución educativa de procedencia' });
+    }
     if (!String(autorizado.nombre || '').trim() || !String(autorizado.dni || '').trim() || !String(autorizado.parentesco || '').trim() || !String(autorizado.celular || '').trim()) return res.status(400).json({ error: 'Registre por lo menos una persona autorizada con nombre, DNI, parentesco y celular' });
     const aceptadoEn = new Date();
     const evidencia = { codigo: item.codigo, datos: json(item.datos_snapshot, {}), formulario, documentos, aceptaciones, aceptado_en: aceptadoEn.toISOString() };
