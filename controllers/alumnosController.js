@@ -302,21 +302,32 @@ const crear = async (req, res) => {
 
       // Registrar/vincular padre si se proporciono DNI de padre
       if (padre_dni) {
-        let padre = await tx.tbl_padres.findUnique({ where: { dni: padre_dni } });
+        let padre = await tx.tbl_padres.findUnique({ where: { dni: padre_dni }, include: { tbl_usuarios: true } });
 
-        if (padre && padre_modo === 'NUEVO') throw new Error('PADRE_DNI_EXISTE');
+        if (padre_modo === 'NUEVO') {
+          if (!padre_nombre || !padre_celular || !padre_username || !padre_contrasena) throw new Error('PADRE_DATOS_INCOMPLETOS');
+          const validacion = validarContrasena(padre_contrasena);
+          if (!validacion.valida) throw new Error('PADRE_CONTRASENA_INVALIDA:' + validacion.mensaje);
+          if (padre && padre.tbl_usuarios.estado !== 'ELIMINADO') throw new Error('PADRE_DNI_EXISTE');
+
+          if (padre?.tbl_usuarios.estado === 'ELIMINADO') {
+            const usernameExiste = await tx.tbl_usuarios.findUnique({ where: { username: padre_username } });
+            if (usernameExiste && usernameExiste.id !== padre.id_usuario) throw new Error('PADRE_USERNAME_EXISTE');
+            const hash = await bcrypt.hash(padre_contrasena, 10);
+            await tx.tbl_usuarios.update({ where: { id: padre.id_usuario }, data: { username: padre_username, contrasena: hash, nombres: padre_nombre, estado: 'ACTIVO', intentos_fallidos: 0, bloqueado_hasta: null, user_id_modification: req.user.id, date_time_modification: new Date() } });
+            padre = await tx.tbl_padres.update({ where: { id: padre.id }, data: { nombre_completo: padre_nombre, apellido_paterno: padre_apellido_paterno?.trim() || null, apellido_materno: padre_apellido_materno?.trim() || null, nombres: padre_nombres?.trim() || null, celular: padre_celular, user_id_modification: req.user.id, date_time_modification: new Date() } });
+          }
+        }
 
         if (!padre) {
           // Crear padre nuevo: requiere datos completos
-          if (!padre_nombre || !padre_celular || !padre_username || !padre_contrasena) {
-            throw new Error('PADRE_DATOS_INCOMPLETOS');
-          }
+          if (!padre_nombre || !padre_celular || !padre_username || !padre_contrasena) throw new Error('PADRE_DATOS_INCOMPLETOS');
 
           const usernameExiste = await tx.tbl_usuarios.findUnique({ where: { username: padre_username } });
           if (usernameExiste) throw new Error('PADRE_USERNAME_EXISTE');
 
-          const validacion = validarContrasena(padre_contrasena);
-          if (!validacion.valida) throw new Error('PADRE_CONTRASENA_INVALIDA:' + validacion.mensaje);
+          const validacionNueva = validarContrasena(padre_contrasena);
+          if (!validacionNueva.valida) throw new Error('PADRE_CONTRASENA_INVALIDA:' + validacionNueva.mensaje);
 
           const rolPadre = await tx.tbl_roles.findUnique({ where: { codigo: 'PADRE' } });
           const hash = await bcrypt.hash(padre_contrasena, 10);
