@@ -223,6 +223,9 @@ model tbl_padres {
   id                         Int                          @id @default(autoincrement())
   dni                        String                       @unique @db.VarChar(20)
   nombre_completo            String                       @db.VarChar(200)
+  apellido_paterno           String?                      @db.VarChar(100)
+  apellido_materno           String?                      @db.VarChar(100)
+  nombres                    String?                      @db.VarChar(150)
   celular                    String                       @db.VarChar(20)
   id_usuario                 Int                          @unique
   user_id_registration       Int?

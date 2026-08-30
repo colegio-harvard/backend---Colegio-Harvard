@@ -17,6 +17,9 @@ const listar = async (req, res) => {
       id: p.id,
       dni: p.dni,
       nombre_completo: p.nombre_completo,
+      apellido_paterno: p.apellido_paterno,
+      apellido_materno: p.apellido_materno,
+      nombres: p.nombres,
       celular: p.celular,
       id_usuario: p.id_usuario,
       date_time_registration: p.date_time_registration,
@@ -52,6 +55,9 @@ const obtenerPorId = async (req, res) => {
       id: padre.id,
       dni: padre.dni,
       nombre_completo: padre.nombre_completo,
+      apellido_paterno: padre.apellido_paterno,
+      apellido_materno: padre.apellido_materno,
+      nombres: padre.nombres,
       celular: padre.celular,
       id_usuario: padre.id_usuario,
       date_time_registration: padre.date_time_registration,
@@ -78,8 +84,9 @@ const obtenerPorId = async (req, res) => {
 };
 
 const crear = async (req, res) => {
-  const { dni, nombre_completo, celular, username, contrasena } = req.body;
-  if (!dni || !nombre_completo || !celular || !username || !contrasena) {
+  const { dni, apellido_paterno, apellido_materno, nombres, celular, username, contrasena } = req.body;
+  const nombre_completo = [nombres, apellido_paterno, apellido_materno].map((v) => String(v || '').trim()).filter(Boolean).join(' ');
+  if (!dni || !apellido_paterno || !nombres || !celular || !username || !contrasena) {
     return res.status(400).json({ error: 'Todos los campos son obligatorios' });
   }
   const validacion = validarContrasena(contrasena);
@@ -103,7 +110,7 @@ const crear = async (req, res) => {
         data: { username, contrasena: hash, nombres: nombre_completo, id_rol: rolPadre.id, estado: 'ACTIVO', user_id_registration: req.user.id },
       });
       const padre = await tx.tbl_padres.create({
-        data: { dni, nombre_completo, celular, id_usuario: usuario.id, user_id_registration: req.user.id },
+        data: { dni, nombre_completo, apellido_paterno: apellido_paterno.trim(), apellido_materno: apellido_materno?.trim() || null, nombres: nombres.trim(), celular, id_usuario: usuario.id, user_id_registration: req.user.id },
       });
       return { usuario, padre };
     });
@@ -119,14 +126,26 @@ const crear = async (req, res) => {
 
 const actualizar = async (req, res) => {
   const id = parseInt(req.params.id);
-  const { nombre_completo, celular } = req.body;
+  const { apellido_paterno, apellido_materno, nombres, celular } = req.body;
 
   try {
     const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
-    if (nombre_completo) data.nombre_completo = nombre_completo;
+    let usuarioId = null;
+    if (apellido_paterno !== undefined || apellido_materno !== undefined || nombres !== undefined) {
+      const actual = await prisma.tbl_padres.findUnique({ where: { id } });
+      if (!actual) return res.status(404).json({ error: 'Padre no encontrado' });
+      usuarioId = actual.id_usuario;
+      data.apellido_paterno = apellido_paterno?.trim() || actual.apellido_paterno;
+      data.apellido_materno = apellido_materno?.trim() || null;
+      data.nombres = nombres?.trim() || actual.nombres;
+      data.nombre_completo = [data.nombres, data.apellido_paterno, data.apellido_materno].filter(Boolean).join(' ');
+    }
     if (celular) data.celular = celular;
 
-    await prisma.tbl_padres.update({ where: { id }, data });
+    await prisma.$transaction(async (tx) => {
+      await tx.tbl_padres.update({ where: { id }, data });
+      if (usuarioId && data.nombre_completo) await tx.tbl_usuarios.update({ where: { id: usuarioId }, data: { nombres: data.nombre_completo, user_id_modification: req.user.id, date_time_modification: new Date() } });
+    });
     await registrarAuditoria({ userId: req.user.id, accion: 'ACTUALIZAR_PADRE', tipoEntidad: 'tbl_padres', idEntidad: id, resumen: `Padre ${id} actualizado` });
     res.json({ mensaje: 'Padre actualizado' });
   } catch (error) { res.status(500).json({ error: 'Error al actualizar padre' }); }
@@ -160,7 +179,7 @@ const buscar = async (req, res) => {
           { nombre_completo: { contains: q, mode: 'insensitive' } },
         ],
       },
-      select: { id: true, dni: true, nombre_completo: true, celular: true },
+      select: { id: true, dni: true, nombre_completo: true, apellido_paterno: true, apellido_materno: true, nombres: true, celular: true },
       take: 10,
       orderBy: { nombre_completo: 'asc' },
     });

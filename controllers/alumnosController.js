@@ -237,7 +237,7 @@ const siguienteCodigo = async (_req, res) => {
 };
 
 const crear = async (req, res) => {
-  const { codigo_alumno, dni, nombre_completo, apellido_paterno, apellido_materno, nombres, monto_matricula, monto_materiales, monto_pension, id_aula, padre_dni, padre_nombre, padre_celular, padre_username, padre_contrasena } = req.body;
+  const { codigo_alumno, dni, nombre_completo, apellido_paterno, apellido_materno, nombres, monto_matricula, monto_materiales, monto_pension, id_aula, padre_dni, padre_nombre, padre_apellido_paterno, padre_apellido_materno, padre_nombres, padre_celular, padre_username, padre_contrasena } = req.body;
 
   if (!nombre_completo || !id_aula) {
     return res.status(400).json({ error: 'Nombre y aula son obligatorios' });
@@ -324,7 +324,7 @@ const crear = async (req, res) => {
           });
 
           padre = await tx.tbl_padres.create({
-            data: { dni: padre_dni, nombre_completo: padre_nombre, celular: padre_celular, id_usuario: usuario.id, user_id_registration: req.user.id },
+            data: { dni: padre_dni, nombre_completo: padre_nombre, apellido_paterno: padre_apellido_paterno?.trim() || null, apellido_materno: padre_apellido_materno?.trim() || null, nombres: padre_nombres?.trim() || null, celular: padre_celular, id_usuario: usuario.id, user_id_registration: req.user.id },
           });
         }
 
