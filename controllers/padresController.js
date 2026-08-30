@@ -158,19 +158,33 @@ const actualizar = async (req, res) => {
 const eliminar = async (req, res) => {
   const id = parseInt(req.params.id);
   try {
-    const padre = await prisma.tbl_padres.findUnique({ where: { id }, include: { _count: { select: { tbl_padres_alumnos: true } } } });
+    const padre = await prisma.tbl_padres.findUnique({ where: { id } });
     if (!padre) return res.status(404).json({ error: 'Padre no encontrado' });
-    if (padre._count.tbl_padres_alumnos > 0) return res.status(409).json({ error: 'Primero elimine o desvincule todos los alumnos asociados a este apoderado' });
 
     const suffix = `_DELETED_${id}`;
     const hashInutilizable = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
     await prisma.$transaction(async (tx) => {
+      const vinculos = await tx.tbl_padres_alumnos.findMany({
+        where: { id_padre: id },
+        include: { tbl_alumnos: { select: { id: true, estado: true } } },
+      });
+      const alumnosVigentes = vinculos.filter((v) => v.tbl_alumnos?.estado !== 'DELETED');
+      if (alumnosVigentes.length) throw new Error('PADRE_TIENE_ALUMNOS_VIGENTES');
+      const alumnosEliminados = vinculos.filter((v) => v.tbl_alumnos?.estado === 'DELETED');
+      if (alumnosEliminados.length) {
+        await tx.tbl_padres_alumnos.deleteMany({
+          where: { id_padre: id, id_alumno: { in: alumnosEliminados.map((v) => v.id_alumno) } },
+        });
+      }
       await tx.tbl_padres.update({ where: { id }, data: { dni: `${padre.dni}${suffix}`, nombre_completo: `APODERADO ELIMINADO ${id}`, apellido_paterno: null, apellido_materno: null, nombres: null, celular: '', user_id_modification: req.user.id, date_time_modification: new Date() } });
       if (padre.id_usuario) await tx.tbl_usuarios.update({ where: { id: padre.id_usuario }, data: { username: `${(await tx.tbl_usuarios.findUnique({ where: { id: padre.id_usuario }, select: { username: true } })).username}${suffix}`, nombres: `APODERADO ELIMINADO ${id}`, contrasena: hashInutilizable, estado: 'ELIMINADO', user_id_modification: req.user.id, date_time_modification: new Date() } });
-      await tx.tbl_auditoria.create({ data: { id_usuario_actor: req.user.id, codigo_accion: 'ELIMINAR_APODERADO', tipo_entidad: 'tbl_padres', id_entidad: id, resumen: `Apoderado de prueba ${id} eliminado; identidad y credenciales invalidadas`, meta_json: { alumnos_vinculados: 0, dni_liberado: true, usuario_liberado: true } } });
-    });
+      await tx.tbl_auditoria.create({ data: { id_usuario_actor: req.user.id, codigo_accion: 'ELIMINAR_APODERADO', tipo_entidad: 'tbl_padres', id_entidad: id, resumen: `Apoderado de prueba ${id} eliminado; identidad y credenciales invalidadas`, meta_json: { vinculos_residuales_eliminados: alumnosEliminados.length, alumnos_vigentes: 0, dni_liberado: true, usuario_liberado: true } } });
+    }, { isolationLevel: 'Serializable' });
     res.json({ mensaje: 'Apoderado eliminado; su DNI y usuario quedaron disponibles para una nueva prueba' });
-  } catch (error) { res.status(500).json({ error: 'Error al eliminar padre' }); }
+  } catch (error) {
+    if (error.message === 'PADRE_TIENE_ALUMNOS_VIGENTES') return res.status(409).json({ error: 'No se puede eliminar: el apoderado todavía tiene alumnos vigentes vinculados' });
+    res.status(500).json({ error: 'Error al eliminar padre' });
+  }
 };
 
 const buscar = async (req, res) => {
