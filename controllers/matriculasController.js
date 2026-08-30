@@ -343,10 +343,10 @@ async function solicitarCorreccion(req, res) {
 
 async function detalle(req, res) {
   try {
-    const rows = await prisma.$queryRawUnsafe(`SELECT md.*,ae.anio FROM "tbl_matriculas_digitales" md JOIN "tbl_anios_escolares" ae ON ae.id=md.id_anio_escolar WHERE md.id=$1`, Number(req.params.id));
+    const rows = await prisma.$queryRawUnsafe(`SELECT md.*,ae.anio,al.monto_matricula monto_matricula_actual,al.monto_pension monto_pension_actual,al.monto_materiales monto_materiales_actual FROM "tbl_matriculas_digitales" md JOIN "tbl_anios_escolares" ae ON ae.id=md.id_anio_escolar JOIN "tbl_alumnos" al ON al.id=md.id_alumno WHERE md.id=$1`, Number(req.params.id));
     if (!rows[0]) return res.status(404).json({ error: 'Matrícula no encontrada' });
     const eventos = await prisma.$queryRawUnsafe(`SELECT * FROM "tbl_eventos_matricula" WHERE id_matricula=$1 ORDER BY creado_en`, Number(req.params.id));
-    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), borrador_asistido: json(rows[0].borrador_asistido, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), control_documental: json(rows[0].control_documental, {}), eventos } });
+    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), montos_ficha_actual: { matricula: Number(rows[0].monto_matricula_actual || 0), pension: Number(rows[0].monto_pension_actual || 0), materiales: Number(rows[0].monto_materiales_actual || 0) }, datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), borrador_asistido: json(rows[0].borrador_asistido, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), control_documental: json(rows[0].control_documental, {}), eventos } });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo cargar el expediente' }); }
 }
 
