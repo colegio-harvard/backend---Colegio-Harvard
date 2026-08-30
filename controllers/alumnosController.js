@@ -348,6 +348,9 @@ const crear = async (req, res) => {
     if (error.message === 'PADRE_USERNAME_EXISTE') {
       return res.status(409).json({ error: 'El username del padre ya existe en el sistema' });
     }
+    if (error.message === 'PADRE_DNI_EXISTE') {
+      return res.status(409).json({ error: 'Este DNI ya pertenece a un apoderado. Selecciónelo como existente o elimine primero el registro anterior.' });
+    }
     if (error.message?.startsWith('PADRE_CONTRASENA_INVALIDA:')) {
       return res.status(400).json({ error: error.message.split(':')[1] });
     }
@@ -536,10 +539,6 @@ const eliminarPermanentemente = async (req, res) => {
       await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINACION_PERMANENTE_RECHAZADA', tipoEntidad: 'tbl_alumnos', idEntidad: id, resumen: `Confirmación de identidad fallida para eliminar alumno ${id}`, req });
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
-    if (error.message === 'PADRE_DNI_EXISTE') {
-      return res.status(409).json({ error: 'Este DNI ya pertenece a un apoderado. Selecciónelo como existente o use otro DNI.' });
-    }
-
     const resultado = await prisma.$transaction(async (tx) => {
       await tx.$queryRawUnsafe('SELECT id FROM "tbl_alumnos" WHERE id=$1 FOR UPDATE', id);
       const inventario = await obtenerInventarioEliminacion(tx, id);
