@@ -9,7 +9,10 @@ const listar = async (req, res) => {
       where: { tbl_usuarios: { estado: { not: 'ELIMINADO' } } },
       include: {
         tbl_usuarios: { select: { id: true, username: true, estado: true } },
-        tbl_padres_alumnos: { include: { tbl_alumnos: { select: { id: true, nombre_completo: true, codigo_alumno: true } } } },
+        tbl_padres_alumnos: {
+          where: { tbl_alumnos: { estado: 'ACTIVO' } },
+          include: { tbl_alumnos: { select: { id: true, nombre_completo: true, codigo_alumno: true } } },
+        },
       },
       orderBy: { id: 'asc' },
     });
