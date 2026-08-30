@@ -108,17 +108,19 @@ async function guardarConfiguracion(req, res) {
     if (!anio) return res.status(400).json({ error: 'No hay año escolar activo' });
     const enlace = String(req.body.enlace_documentos || '').trim();
     if (enlace && !/^https:\/\//i.test(enlace)) return res.status(400).json({ error: 'El enlace debe comenzar con https://' });
+    const enlaceApp = String(req.body.enlace_descarga_app || '').trim();
+    if (enlaceApp && !/^https:\/\//i.test(enlaceApp)) return res.status(400).json({ error: 'El enlace de la app debe comenzar con https://' });
     const documentos = Array.isArray(req.body.documentos_json) ? req.body.documentos_json : DOCUMENTOS_BASE;
     const rows = await prisma.$queryRawUnsafe(`
-      INSERT INTO "tbl_config_matricula" ("id_anio_escolar","fecha_inicio","fecha_fin","nombre_documentos","enlace_documentos","version_documentos","documentos_json","activo","creado_por")
-      VALUES ($1,$2::date,$3::date,$4,$5,$6,$7::jsonb,$8,$9)
+      INSERT INTO "tbl_config_matricula" ("id_anio_escolar","fecha_inicio","fecha_fin","nombre_documentos","enlace_documentos","enlace_descarga_app","version_documentos","documentos_json","activo","creado_por")
+      VALUES ($1,$2::date,$3::date,$4,$5,$6,$7,$8::jsonb,$9,$10)
       ON CONFLICT ("id_anio_escolar") DO UPDATE SET
         "fecha_inicio"=EXCLUDED."fecha_inicio","fecha_fin"=EXCLUDED."fecha_fin",
-        "nombre_documentos"=EXCLUDED."nombre_documentos","enlace_documentos"=EXCLUDED."enlace_documentos",
+        "nombre_documentos"=EXCLUDED."nombre_documentos","enlace_documentos"=EXCLUDED."enlace_documentos","enlace_descarga_app"=EXCLUDED."enlace_descarga_app",
         "version_documentos"=EXCLUDED."version_documentos","documentos_json"=EXCLUDED."documentos_json",
-        "activo"=EXCLUDED."activo","actualizado_por"=$9,"actualizado_en"=NOW()
+        "activo"=EXCLUDED."activo","actualizado_por"=$10,"actualizado_en"=NOW()
       RETURNING *`, anio.id, req.body.fecha_inicio || null, req.body.fecha_fin || null,
-      String(req.body.nombre_documentos || 'Documentos oficiales de matrícula').trim(), enlace || null,
+      String(req.body.nombre_documentos || 'Documentos oficiales de matrícula').trim(), enlace || null, enlaceApp || null,
       String(req.body.version_documentos || '1.0').trim(), JSON.stringify(documentos), req.body.activo !== false, req.user.id);
     await registrarAuditoria({ userId: req.user.id, accion: 'CONFIGURAR_MATRICULA_DIGITAL', tipoEntidad: 'tbl_config_matricula', idEntidad: rows[0].id, resumen: `Configuración de matrícula ${anio.anio}`, req });
     res.json({ data: { ...rows[0], documentos_json: documentosConfigurados(rows[0]) } });
@@ -221,7 +223,8 @@ async function invitar(req, res) {
     await registrarEvento(matricula.id, 'INVITACION_GENERADA', { canal: 'WHATSAPP_SEMIAUTOMATICO', telefono: String(alumno.celular).replace(/.(?=.{3})/g, '*') }, req, req.user.id);
     const frontend = String(process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:5173').split(',')[0].trim().replace(/\/$/, '');
     const enlace = `${frontend}/matricula/${token}`;
-    const mensaje = `COLEGIO HARVARD\nMatrícula digital ${anio.anio} de ${alumno.nombre_completo}.\nEnlace personal: ${enlace}\nCódigo de verificación: ${otp}\nVálido por 24 horas. No comparta este mensaje.`;
+    const descargaApp = config.enlace_descarga_app ? `\n\nDescargue la aplicación oficial del Colegio Harvard:\n${config.enlace_descarga_app}` : '';
+    const mensaje = `COLEGIO HARVARD\nMatrícula digital ${anio.anio} de ${alumno.nombre_completo}.\nEnlace personal: ${enlace}\nCódigo de verificación: ${otp}\nVálido por 24 horas. No comparta este mensaje.${descargaApp}`;
     await registrarAuditoria({ userId: req.user.id, accion: 'INVITAR_MATRICULA_DIGITAL', tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matricula.id, resumen: `Invitación ${codigo} para ${alumno.nombre_completo}`, req });
     res.status(201).json({ data: { id: matricula.id, codigo, enlace, otp, telefono: alumno.celular, mensaje } });
   } catch (error) {
