@@ -9,6 +9,6 @@ router.get('/buscar', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl
 router.get('/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.obtenerPorId);
 router.post('/', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.crear);
 router.put('/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.actualizar);
-router.delete('/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.eliminar);
+router.delete('/:id', verificarToken, verificarRol('SUPER_ADMIN'), ctrl.eliminar);
 
 module.exports = router;

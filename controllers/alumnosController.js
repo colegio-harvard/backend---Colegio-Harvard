@@ -237,7 +237,7 @@ const siguienteCodigo = async (_req, res) => {
 };
 
 const crear = async (req, res) => {
-  const { codigo_alumno, dni, nombre_completo, apellido_paterno, apellido_materno, nombres, monto_matricula, monto_materiales, monto_pension, id_aula, padre_dni, padre_nombre, padre_apellido_paterno, padre_apellido_materno, padre_nombres, padre_celular, padre_username, padre_contrasena } = req.body;
+  const { codigo_alumno, dni, nombre_completo, apellido_paterno, apellido_materno, nombres, monto_matricula, monto_materiales, monto_pension, id_aula, padre_dni, padre_modo, padre_nombre, padre_apellido_paterno, padre_apellido_materno, padre_nombres, padre_celular, padre_username, padre_contrasena } = req.body;
 
   if (!nombre_completo || !id_aula) {
     return res.status(400).json({ error: 'Nombre y aula son obligatorios' });
@@ -303,6 +303,8 @@ const crear = async (req, res) => {
       // Registrar/vincular padre si se proporciono DNI de padre
       if (padre_dni) {
         let padre = await tx.tbl_padres.findUnique({ where: { dni: padre_dni } });
+
+        if (padre && padre_modo === 'NUEVO') throw new Error('PADRE_DNI_EXISTE');
 
         if (!padre) {
           // Crear padre nuevo: requiere datos completos
@@ -533,6 +535,9 @@ const eliminarPermanentemente = async (req, res) => {
     if (!actor || actor.estado !== 'ACTIVO' || !(await bcrypt.compare(contrasena, actor.contrasena))) {
       await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINACION_PERMANENTE_RECHAZADA', tipoEntidad: 'tbl_alumnos', idEntidad: id, resumen: `Confirmación de identidad fallida para eliminar alumno ${id}`, req });
       return res.status(401).json({ error: 'Contraseña incorrecta' });
+    }
+    if (error.message === 'PADRE_DNI_EXISTE') {
+      return res.status(409).json({ error: 'Este DNI ya pertenece a un apoderado. Selecciónelo como existente o use otro DNI.' });
     }
 
     const resultado = await prisma.$transaction(async (tx) => {

@@ -6,6 +6,7 @@ const { validarContrasena } = require('../utils/validaciones');
 const listar = async (req, res) => {
   try {
     const padres = await prisma.tbl_padres.findMany({
+      where: { tbl_usuarios: { estado: { not: 'ELIMINADO' } } },
       include: {
         tbl_usuarios: { select: { id: true, username: true, estado: true } },
         tbl_padres_alumnos: { include: { tbl_alumnos: { select: { id: true, nombre_completo: true, codigo_alumno: true } } } },
@@ -154,15 +155,18 @@ const actualizar = async (req, res) => {
 const eliminar = async (req, res) => {
   const id = parseInt(req.params.id);
   try {
-    const padre = await prisma.tbl_padres.findUnique({ where: { id } });
+    const padre = await prisma.tbl_padres.findUnique({ where: { id }, include: { _count: { select: { tbl_padres_alumnos: true } } } });
     if (!padre) return res.status(404).json({ error: 'Padre no encontrado' });
+    if (padre._count.tbl_padres_alumnos > 0) return res.status(409).json({ error: 'Primero elimine o desvincule todos los alumnos asociados a este apoderado' });
 
-    if (padre.id_usuario) {
-      await prisma.tbl_usuarios.update({ where: { id: padre.id_usuario }, data: { estado: 'ELIMINADO', user_id_modification: req.user.id, date_time_modification: new Date() } });
-    }
-
-    await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINAR_PADRE', tipoEntidad: 'tbl_padres', idEntidad: id, resumen: `Padre ${padre.nombre_completo} eliminado (soft)` });
-    res.json({ mensaje: 'Padre eliminado' });
+    const suffix = `_DELETED_${id}`;
+    const hashInutilizable = await bcrypt.hash(require('crypto').randomBytes(32).toString('hex'), 10);
+    await prisma.$transaction(async (tx) => {
+      await tx.tbl_padres.update({ where: { id }, data: { dni: `${padre.dni}${suffix}`, nombre_completo: `APODERADO ELIMINADO ${id}`, apellido_paterno: null, apellido_materno: null, nombres: null, celular: '', user_id_modification: req.user.id, date_time_modification: new Date() } });
+      if (padre.id_usuario) await tx.tbl_usuarios.update({ where: { id: padre.id_usuario }, data: { username: `${(await tx.tbl_usuarios.findUnique({ where: { id: padre.id_usuario }, select: { username: true } })).username}${suffix}`, nombres: `APODERADO ELIMINADO ${id}`, contrasena: hashInutilizable, estado: 'ELIMINADO', user_id_modification: req.user.id, date_time_modification: new Date() } });
+      await tx.tbl_auditoria.create({ data: { id_usuario_actor: req.user.id, codigo_accion: 'ELIMINAR_APODERADO', tipo_entidad: 'tbl_padres', id_entidad: id, resumen: `Apoderado de prueba ${id} eliminado; identidad y credenciales invalidadas`, meta_json: { alumnos_vinculados: 0, dni_liberado: true, usuario_liberado: true } } });
+    });
+    res.json({ mensaje: 'Apoderado eliminado; su DNI y usuario quedaron disponibles para una nueva prueba' });
   } catch (error) { res.status(500).json({ error: 'Error al eliminar padre' }); }
 };
 
@@ -174,6 +178,7 @@ const buscar = async (req, res) => {
   try {
     const padres = await prisma.tbl_padres.findMany({
       where: {
+        tbl_usuarios: { estado: { not: 'ELIMINADO' } },
         OR: [
           { dni: { startsWith: q } },
           { nombre_completo: { contains: q, mode: 'insensitive' } },
