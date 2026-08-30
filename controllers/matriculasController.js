@@ -358,6 +358,11 @@ async function guardarBorradorAsistido(req, res) {
     const matriculaId = Number(req.params.id);
     if (!Number.isInteger(matriculaId) || matriculaId <= 0) return res.status(400).json({ error: 'Matrícula inválida' });
     const borrador = limpiarBorradorAsistido(req.body.borrador || {});
+    if (borrador.tipo_ingreso === 'PROMOCION_INTERNA') borrador.institucion_procedencia = 'Colegio Harvard';
+    if (borrador.tipo_ingreso === 'INGRESO_INICIAL') {
+      for (const campo of ['condicion_promocion','anio_escolar_anterior','nivel_anterior','grado_anterior','institucion_procedencia','codigo_modular_procedencia','ubicacion_procedencia']) borrador[campo] = '';
+    }
+    if (borrador.tipo_ingreso === 'TRASLADO' && (!borrador.institucion_procedencia || borrador.institucion_procedencia.toLocaleLowerCase('es') === 'colegio harvard')) return res.status(400).json({ error: 'En un traslado debe indicar el colegio anterior; la institución de procedencia no puede ser Colegio Harvard' });
     const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET borrador_asistido=$1::jsonb,borrador_preparado_por=$2,borrador_preparado_en=NOW(),estado=CASE WHEN estado='OBSERVADA' THEN 'ABIERTA' ELSE estado END,observacion_revision=CASE WHEN estado='OBSERVADA' THEN NULL ELSE observacion_revision END,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 AND estado IN ('BORRADOR','ENVIADA','ABIERTA','OBSERVADA') RETURNING id,codigo,estado,borrador_asistido,borrador_preparado_en`, JSON.stringify(borrador), req.user.id, matriculaId);
     if (!rows[0]) return res.status(409).json({ error: 'Solo puede preparar matrículas pendientes de aceptación' });
     await registrarEvento(matriculaId, 'BORRADOR_ASISTIDO_PREPARADO', {}, req, req.user.id);
