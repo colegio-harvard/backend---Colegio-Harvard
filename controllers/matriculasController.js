@@ -212,7 +212,7 @@ async function invitar(req, res) {
         "otp_vence_en"=EXCLUDED."otp_vence_en","invitacion_vence_en"=EXCLUDED."invitacion_vence_en","otp_intentos"=0,
         "datos_snapshot"=EXCLUDED."datos_snapshot","documentos_snapshot"=EXCLUDED."documentos_snapshot",
         "deuda_snapshot"=EXCLUDED."deuda_snapshot","costo_matricula_snapshot"=EXCLUDED."costo_matricula_snapshot",
-        "aceptaciones_json"='{}'::jsonb,"aceptado_en"=NULL,"hash_evidencia"=NULL,"observacion_revision"=NULL,
+        "datos_formulario"='{}'::jsonb,"aceptaciones_json"='{}'::jsonb,"aceptado_en"=NULL,"hash_evidencia"=NULL,"observacion_revision"=NULL,
         "actualizado_por"=$10,"actualizado_en"=NOW()
       RETURNING *`, anio.id, idAlumno, alumno.id_padre, tokenHash, otpHash, JSON.stringify(snapshot), JSON.stringify(documentos), deuda, Number(alumno.monto_matricula || 0), req.user.id);
     const matricula = rows[0];
@@ -245,7 +245,10 @@ async function obtenerPublica(req, res) {
     }
     const borrador = json(item.borrador_asistido, {});
     const formularioGuardado = json(item.datos_formulario, {});
-    res.json({ data: { codigo: item.codigo, estado: item.estado, anio: item.anio, datos: json(item.datos_snapshot, {}), formulario: { ...borrador, ...formularioGuardado }, preparado_por_colegio: Object.keys(borrador).length > 0, borrador_preparado_en: item.borrador_preparado_en, documentos: json(item.documentos_snapshot, []), aceptaciones: json(item.aceptaciones_json, {}), deuda: Number(item.deuda_snapshot || 0), matricula: Number(item.costo_matricula_snapshot || 0), aceptado_en: item.aceptado_en, hash_evidencia: item.hash_evidencia, observacion_revision: item.observacion_revision } });
+    const formulario = ['ACEPTADA', 'COMPLETADA'].includes(item.estado)
+      ? formularioGuardado
+      : { ...formularioGuardado, ...borrador };
+    res.json({ data: { codigo: item.codigo, estado: item.estado, anio: item.anio, datos: json(item.datos_snapshot, {}), formulario, preparado_por_colegio: Object.keys(borrador).length > 0, borrador_preparado_en: item.borrador_preparado_en, documentos: json(item.documentos_snapshot, []), aceptaciones: json(item.aceptaciones_json, {}), deuda: Number(item.deuda_snapshot || 0), matricula: Number(item.costo_matricula_snapshot || 0), aceptado_en: item.aceptado_en, hash_evidencia: item.hash_evidencia, observacion_revision: item.observacion_revision } });
   } catch (error) {
     console.error('Error consulta matrícula pública:', error);
     res.status(500).json({ error: 'No se pudo consultar la matrícula' });
