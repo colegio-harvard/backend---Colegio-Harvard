@@ -346,7 +346,7 @@ async function detalle(req, res) {
     const rows = await prisma.$queryRawUnsafe(`SELECT md.*,ae.anio,al.monto_matricula monto_matricula_actual,al.monto_pension monto_pension_actual,al.monto_materiales monto_materiales_actual FROM "tbl_matriculas_digitales" md JOIN "tbl_anios_escolares" ae ON ae.id=md.id_anio_escolar JOIN "tbl_alumnos" al ON al.id=md.id_alumno WHERE md.id=$1`, Number(req.params.id));
     if (!rows[0]) return res.status(404).json({ error: 'Matrícula no encontrada' });
     const eventos = await prisma.$queryRawUnsafe(`SELECT * FROM "tbl_eventos_matricula" WHERE id_matricula=$1 ORDER BY creado_en`, Number(req.params.id));
-    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), montos_ficha_actual: { matricula: Number(rows[0].monto_matricula_actual || 0), pension: Number(rows[0].monto_pension_actual || 0), materiales: Number(rows[0].monto_materiales_actual || 0) }, datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), borrador_asistido: json(rows[0].borrador_asistido, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), control_documental: json(rows[0].control_documental, {}), eventos } });
+    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), montos_ficha_actual: { matricula: Number(rows[0].monto_matricula_actual || 0), pension: Number(rows[0].monto_pension_actual || 0), materiales: Number(rows[0].monto_materiales_actual || 0) }, datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), borrador_asistido: json(rows[0].borrador_asistido, {}), complemento_administrativo: json(rows[0].complemento_administrativo, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), control_documental: json(rows[0].control_documental, {}), eventos } });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo cargar el expediente' }); }
 }
 
@@ -376,6 +376,27 @@ async function guardarBorradorAsistido(req, res) {
     await registrarAuditoria({ userId: req.user.id, accion: 'PREPARAR_BORRADOR_MATRICULA', tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matriculaId, resumen: `Borrador asistido de ${rows[0].codigo}`, req });
     res.json({ data: { ...rows[0], borrador_asistido: json(rows[0].borrador_asistido, {}) } });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el borrador asistido' }); }
+}
+
+async function guardarComplementoAdministrativo(req, res) {
+  try {
+    const matriculaId = Number(req.params.id);
+    if (!Number.isInteger(matriculaId) || matriculaId <= 0) return res.status(400).json({ error: 'Matrícula inválida' });
+    const motivo = String(req.body.motivo || '').trim().slice(0, 1000);
+    if (motivo.length < 10) return res.status(400).json({ error: 'Indique una justificación de por lo menos 10 caracteres' });
+    const complemento = limpiarBorradorAsistido(req.body.complemento || {});
+    if (complemento.tipo_ingreso === 'PROMOCION_INTERNA') complemento.institucion_procedencia = 'Colegio Harvard';
+    if (complemento.tipo_ingreso === 'INGRESO_INICIAL') {
+      for (const campo of ['condicion_promocion','anio_escolar_anterior','nivel_anterior','grado_anterior','institucion_procedencia','codigo_modular_procedencia','ubicacion_procedencia']) complemento[campo] = '';
+    }
+    if (complemento.tipo_ingreso === 'TRASLADO' && (!complemento.institucion_procedencia || complemento.institucion_procedencia.toLocaleLowerCase('es') === 'colegio harvard')) return res.status(400).json({ error: 'En un traslado debe indicar el colegio anterior; la institución de procedencia no puede ser Colegio Harvard' });
+    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET complemento_administrativo=$1::jsonb,motivo_complemento=$2,complementado_por=$3,complementado_en=NOW(),actualizado_por=$3,actualizado_en=NOW() WHERE id=$4 AND estado='COMPLETADA' RETURNING id,codigo,estado,complemento_administrativo,motivo_complemento,complementado_por,complementado_en`, JSON.stringify(complemento), motivo, req.user.id, matriculaId);
+    if (!rows[0]) return res.status(409).json({ error: 'Solo se puede complementar una matrícula completada' });
+    const camposActualizados = Object.keys(complemento).filter((campo) => JSON.stringify(complemento[campo]) !== JSON.stringify('') && JSON.stringify(complemento[campo]) !== JSON.stringify({ nombre: '', dni: '', parentesco: '', celular: '' }));
+    await registrarEvento(matriculaId, 'COMPLEMENTO_ADMINISTRATIVO_ACTUALIZADO', { motivo, campos: camposActualizados }, req, req.user.id);
+    await registrarAuditoria({ userId: req.user.id, accion: 'COMPLEMENTAR_MATRICULA_COMPLETADA', tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matriculaId, resumen: `Complemento administrativo de ${rows[0].codigo}: ${motivo}`, req });
+    res.json({ data: { ...rows[0], complemento_administrativo: json(rows[0].complemento_administrativo, {}) } });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar el complemento administrativo' }); }
 }
 
 const DOCUMENTOS_CONTROL = new Set(['certificado_estudios', 'ficha_unica_matricula', 'libreta_anterior', 'dni_alumno', 'dni_apoderado', 'foto_alumno', 'foto_apoderado']);
@@ -411,5 +432,5 @@ async function revisar(req, res) {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo revisar la matrícula' }); }
 }
 
-module.exports = { bootstrap, guardarConfiguracion, preparar, invitar, obtenerPublica, aceptar, solicitarCorreccion, detalle, guardarBorradorAsistido, guardarControlDocumental, revisar };
+module.exports = { bootstrap, guardarConfiguracion, preparar, invitar, obtenerPublica, aceptar, solicitarCorreccion, detalle, guardarBorradorAsistido, guardarComplementoAdministrativo, guardarControlDocumental, revisar };
 
