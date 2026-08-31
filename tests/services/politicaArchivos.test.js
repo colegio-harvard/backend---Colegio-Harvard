@@ -12,6 +12,7 @@ const {
 describe('politica de archivos', () => {
   test('acepta claves validas de fotos y adjuntos', () => {
     expect(validarClaveArchivo('fotos/alumno-123.webp')).toBe('fotos/alumno-123.webp');
+    expect(validarClaveArchivo('fotos-carnet/alumno-123.webp')).toBe('fotos-carnet/alumno-123.webp');
     expect(validarClaveArchivo('adjuntos/msg-10-20.pdf')).toBe('adjuntos/msg-10-20.pdf');
   });
 
@@ -40,6 +41,7 @@ describe('politica de archivos', () => {
     expect(esContenidoAlmacenadoPermitido('adjuntos/reporte.pdf', 'application/pdf')).toBe(true);
     expect(esContenidoAlmacenadoPermitido('fotos/alumno.jpg', 'application/octet-stream')).toBe(true);
     expect(esContenidoAlmacenadoPermitido('fotos/alumno.webp', undefined)).toBe(true);
+    expect(esContenidoAlmacenadoPermitido('fotos-carnet/alumno.webp', 'image/webp')).toBe(true);
     expect(esContenidoAlmacenadoPermitido('adjuntos/reporte.pdf', 'text/html')).toBe(false);
   });
 

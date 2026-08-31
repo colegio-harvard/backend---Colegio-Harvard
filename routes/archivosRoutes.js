@@ -33,6 +33,8 @@ const clavesDesdeReferencia = (referencia) => {
 
   const segmentos = ruta.replace(/\\/g, '/').split('/').filter(Boolean);
   const candidatos = [];
+  const indiceFotosCarnet = segmentos.findIndex(segmento => segmento.toLowerCase() === 'fotos-carnet');
+  if (indiceFotosCarnet >= 0) candidatos.push(`fotos-carnet/${segmentos.slice(indiceFotosCarnet + 1).join('/')}`);
   const indiceFotos = segmentos.findIndex(segmento => segmento.toLowerCase() === 'fotos');
   if (indiceFotos >= 0) candidatos.push(`fotos/${segmentos.slice(indiceFotos + 1).join('/')}`);
 

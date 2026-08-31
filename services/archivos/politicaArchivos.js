@@ -2,6 +2,7 @@ const path = require('path');
 
 const PREFIJOS_PERMITIDOS = Object.freeze({
   'fotos/': new Set(['.jpg', '.jpeg', '.png', '.webp']),
+  'fotos-carnet/': new Set(['.jpg', '.jpeg', '.png', '.webp']),
   'adjuntos/': new Set(['.jpg', '.jpeg', '.png', '.pdf']),
 });
 
@@ -53,7 +54,7 @@ const esContenidoAlmacenadoPermitido = (clave, mimetype) => {
   // binary/octet-stream, etc.). La clave ya se valida contra el prefijo fotos/
   // y una extensión de imagen permitida; además se sirve con MIME inferido y
   // nosniff, por lo que no se depende del metadato antiguo de Wasabi.
-  if (prefijo === 'fotos/') return true;
+  if (prefijo === 'fotos/' || prefijo === 'fotos-carnet/') return true;
   return Boolean(
     prefijo
     && (
@@ -74,6 +75,7 @@ const tipoContenidoPorClave = (clave) => {
 
 module.exports = {
   EXTENSIONES_FOTOS: PREFIJOS_PERMITIDOS['fotos/'],
+  EXTENSIONES_FOTOS_CARNET: PREFIJOS_PERMITIDOS['fotos-carnet/'],
   EXTENSIONES_ADJUNTOS: PREFIJOS_PERMITIDOS['adjuntos/'],
   esContenidoAlmacenadoPermitido,
   esCombinacionArchivoPermitida,
