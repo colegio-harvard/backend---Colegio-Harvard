@@ -3,6 +3,32 @@ const { registrarAuditoria } = require('../middleware/auditMiddleware');
 
 const selectAlerta = { id: true, id_alumno: true, mensaje: true, prioridad: true, estado: true, ultima_accion: true, ultima_accion_en: true, date_time_registration: true };
 
+const listar = async (req, res) => {
+  const estado = String(req.query.estado || 'ACTIVA').toUpperCase();
+  const prioridad = String(req.query.prioridad || '').toUpperCase();
+  if (!['ACTIVA', 'RESUELTA', 'TODAS'].includes(estado)) return res.status(400).json({ error: 'Estado inválido' });
+  if (prioridad && !['IMPORTANTE', 'URGENTE'].includes(prioridad)) return res.status(400).json({ error: 'Prioridad inválida' });
+  try {
+    const alertas = await prisma.tbl_alertas_operativas_alumno.findMany({
+      where: {
+        ...(estado !== 'TODAS' ? { estado } : {}),
+        ...(prioridad ? { prioridad } : {}),
+        tbl_alumnos: { estado: { not: 'DELETED' } },
+      },
+      include: {
+        tbl_alumnos: {
+          select: {
+            id: true, codigo_alumno: true, dni: true, nombre_completo: true, foto_url: true,
+            tbl_aulas: { select: { seccion: true, tbl_grados: { select: { nombre: true, tbl_niveles: { select: { nombre: true } } } } } },
+          },
+        },
+      },
+      orderBy: [{ estado: 'asc' }, { prioridad: 'desc' }, { date_time_registration: 'desc' }],
+    });
+    return res.json({ data: alertas, total: alertas.length });
+  } catch (error) { console.error('Error al listar alertas operativas:', error); return res.status(500).json({ error: 'No se pudieron listar las alertas internas' }); }
+};
+
 const obtenerActiva = async (req, res) => {
   const idAlumno = Number(req.params.idAlumno || req.params.id);
   if (!Number.isInteger(idAlumno)) return res.status(400).json({ error: 'Alumno inválido' });
@@ -58,4 +84,4 @@ const registrarAccion = async (req, res) => {
   } catch (error) { console.error('Error al registrar atención de alerta:', error); return res.status(500).json({ error: 'No se pudo registrar la acción' }); }
 };
 
-module.exports = { obtenerActiva, guardar, resolver, registrarAccion };
+module.exports = { listar, obtenerActiva, guardar, resolver, registrarAccion };
