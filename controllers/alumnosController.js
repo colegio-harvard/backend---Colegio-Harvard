@@ -63,6 +63,7 @@ const listar = async (req, res) => {
       dni: a.dni,
       nombre_completo: a.nombre_completo,
       foto_url: a.foto_url,
+      foto_carnet_url: a.foto_carnet_url,
       monto_matricula: a.monto_matricula !== null && a.monto_matricula !== undefined ? Number(a.monto_matricula) : null,
       monto_materiales: a.monto_materiales !== null && a.monto_materiales !== undefined ? Number(a.monto_materiales) : null,
       monto_pension: a.monto_pension !== null && a.monto_pension !== undefined ? Number(a.monto_pension) : null,
@@ -409,6 +410,7 @@ const actualizar = async (req, res) => {
       const ext = path.extname(req.file.originalname);
       const key = `fotos/alumno-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
       data.foto_url = await uploadFile(req.file.buffer, key, req.file.mimetype);
+      data.foto_carnet_url = null;
     }
 
     const alumnoAntes = await prisma.tbl_alumnos.findUnique({ where: { id } });
@@ -636,6 +638,22 @@ const subirFoto = async (req, res) => {
   }
 };
 
+// Guardar un recorte independiente para el fotocheck sin alterar la foto original.
+const subirFotoCarnet = async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!req.file) return res.status(400).json({ error: 'No se envió imagen para el fotocheck' });
+  try {
+    const ext = path.extname(req.file.originalname) || '.webp';
+    const key = `fotos-carnet/alumno-${id}-${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`;
+    const foto_carnet_url = await uploadFile(req.file.buffer, key, req.file.mimetype);
+    await prisma.tbl_alumnos.update({ where: { id }, data: { foto_carnet_url, user_id_modification: req.user.id, date_time_modification: new Date() } });
+    res.json({ data: { mensaje: 'Encuadre del fotocheck guardado', foto_carnet_url } });
+  } catch (error) {
+    console.error('Error al guardar foto del fotocheck:', error);
+    res.status(500).json({ error: 'Error al guardar el encuadre del fotocheck' });
+  }
+};
+
 // Obtener datos del carnet (para descargar/imprimir)
 const obtenerCarnet = async (req, res) => {
   const id_alumno = parseInt(req.params.id_alumno);
@@ -658,6 +676,7 @@ const obtenerCarnet = async (req, res) => {
           codigo_alumno: alumno.codigo_alumno,
           dni: alumno.dni,
           foto_url: alumno.foto_url,
+          foto_carnet_url: alumno.foto_carnet_url,
           aula: `${alumno.tbl_aulas?.tbl_grados?.nombre || ''} ${alumno.tbl_aulas?.seccion || ''}`.trim(),
           nivel: alumno.tbl_aulas?.tbl_grados?.tbl_niveles?.nombre || '',
         },
@@ -709,4 +728,4 @@ const reemitirCarnet = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al reemitir carnet' }); }
 };
 
-module.exports = { listar, obtenerPorId, siguienteCodigo, exportarAulasExcel, crear, actualizar, actualizarSiagie, eliminar, inventarioEliminacionPermanente, eliminarPermanentemente, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };
+module.exports = { listar, obtenerPorId, siguienteCodigo, exportarAulasExcel, crear, actualizar, actualizarSiagie, eliminar, inventarioEliminacionPermanente, eliminarPermanentemente, subirFoto, subirFotoCarnet, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };

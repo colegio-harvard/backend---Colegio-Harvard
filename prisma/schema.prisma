@@ -254,6 +254,7 @@ model tbl_alumnos {
   apellido_materno       String?                  @db.VarChar(100)
   nombres                String?                  @db.VarChar(150)
   foto_url               String?
+  foto_carnet_url        String?
   monto_matricula        Decimal?                 @db.Decimal(10, 2)
   monto_materiales       Decimal?                 @db.Decimal(10, 2)
   monto_pension          Decimal?                 @db.Decimal(10, 2)

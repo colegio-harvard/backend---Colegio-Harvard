@@ -38,6 +38,7 @@ router.get('/:id', verificarToken, ctrl.obtenerPorId);
 router.put('/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), upload.single('foto'), ctrl.actualizar);
 router.patch('/:id/siagie', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.actualizarSiagie);
 router.post('/:id/foto', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), upload.single('foto'), ctrl.subirFoto);
+router.post('/:id/foto-carnet', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), upload.single('foto'), ctrl.subirFotoCarnet);
 router.delete('/:id', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.eliminar);
 
 module.exports = router;
