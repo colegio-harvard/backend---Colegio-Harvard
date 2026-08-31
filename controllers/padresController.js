@@ -3,6 +3,8 @@ const bcrypt = require('bcrypt');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { validarContrasena } = require('../utils/validaciones');
 
+const normalizarBusqueda = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+
 const listar = async (req, res) => {
   try {
     const padres = await prisma.tbl_padres.findMany({
@@ -189,22 +191,20 @@ const eliminar = async (req, res) => {
 
 const buscar = async (req, res) => {
   const { q } = req.query;
-  if (!q || q.length < 2) {
+  const termino = normalizarBusqueda(q);
+  if (termino.length < 2) {
     return res.status(400).json({ error: 'La busqueda requiere al menos 2 caracteres' });
   }
   try {
-    const padres = await prisma.tbl_padres.findMany({
-      where: {
-        tbl_usuarios: { estado: { not: 'ELIMINADO' } },
-        OR: [
-          { dni: { startsWith: q } },
-          { nombre_completo: { contains: q, mode: 'insensitive' } },
-        ],
-      },
-      select: { id: true, dni: true, nombre_completo: true, apellido_paterno: true, apellido_materno: true, nombres: true, celular: true },
-      take: 10,
-      orderBy: { nombre_completo: 'asc' },
-    });
+    const padres = await prisma.$queryRawUnsafe(`
+      SELECT p.id,p.dni,p.nombre_completo,p.apellido_paterno,p.apellido_materno,p.nombres,p.celular
+      FROM "tbl_padres" p
+      JOIN "tbl_usuarios" u ON u.id=p.id_usuario
+      WHERE u.estado<>'ELIMINADO' AND (
+        COALESCE(p.dni,'') LIKE $1 OR
+        translate(lower(COALESCE(p.nombre_completo,'')), 'áéíóúüñ', 'aeiouun') LIKE $2
+      )
+      ORDER BY p.nombre_completo ASC LIMIT 10`, `${termino}%`, `%${termino}%`);
     res.json({ data: padres });
   } catch (error) {
     console.error('Error al buscar padres:', error);
