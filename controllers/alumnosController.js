@@ -66,6 +66,8 @@ const listar = async (req, res) => {
       monto_matricula: a.monto_matricula !== null && a.monto_matricula !== undefined ? Number(a.monto_matricula) : null,
       monto_materiales: a.monto_materiales !== null && a.monto_materiales !== undefined ? Number(a.monto_materiales) : null,
       monto_pension: a.monto_pension !== null && a.monto_pension !== undefined ? Number(a.monto_pension) : null,
+      siagie_inscrito: a.siagie_inscrito,
+      siagie_actualizado_en: a.siagie_actualizado_en,
       estado: a.estado,
       id_aula: a.id_aula,
       aula: a.tbl_aulas ? {
@@ -420,6 +422,28 @@ const actualizar = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al actualizar alumno' }); }
 };
 
+const actualizarSiagie = async (req, res) => {
+  const id = Number(req.params.id);
+  const { inscrito } = req.body;
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Alumno inválido' });
+  if (typeof inscrito !== 'boolean') return res.status(400).json({ error: 'El estado SIAGIE debe ser verdadero o falso' });
+  try {
+    const alumno = await prisma.tbl_alumnos.findUnique({ where: { id }, select: { id: true, nombre_completo: true, codigo_alumno: true, estado: true } });
+    if (!alumno || alumno.estado === 'DELETED') return res.status(404).json({ error: 'Alumno no encontrado' });
+    const ahora = new Date();
+    const actualizado = await prisma.tbl_alumnos.update({
+      where: { id },
+      data: { siagie_inscrito: inscrito, siagie_actualizado_por: req.user.id, siagie_actualizado_en: ahora, user_id_modification: req.user.id, date_time_modification: ahora },
+      select: { id: true, siagie_inscrito: true, siagie_actualizado_en: true },
+    });
+    await registrarAuditoria({ userId: req.user.id, accion: inscrito ? 'MARCAR_INSCRITO_SIAGIE' : 'MARCAR_PENDIENTE_SIAGIE', tipoEntidad: 'tbl_alumnos', idEntidad: id, resumen: `${alumno.codigo_alumno} ${alumno.nombre_completo}: ${inscrito ? 'inscrito' : 'pendiente'} en SIAGIE`, req });
+    return res.json({ data: actualizado, message: inscrito ? 'Alumno marcado como inscrito en SIAGIE' : 'Alumno marcado como pendiente en SIAGIE' });
+  } catch (error) {
+    console.error('Error al actualizar SIAGIE:', error);
+    return res.status(500).json({ error: 'No se pudo actualizar el estado SIAGIE' });
+  }
+};
+
 const eliminar = async (req, res) => {
   const id = parseInt(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'ID de alumno invalido' });
@@ -684,4 +708,4 @@ const reemitirCarnet = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al reemitir carnet' }); }
 };
 
-module.exports = { listar, obtenerPorId, siguienteCodigo, exportarAulasExcel, crear, actualizar, eliminar, inventarioEliminacionPermanente, eliminarPermanentemente, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };
+module.exports = { listar, obtenerPorId, siguienteCodigo, exportarAulasExcel, crear, actualizar, actualizarSiagie, eliminar, inventarioEliminacionPermanente, eliminarPermanentemente, subirFoto, obtenerCarnet, vincularPadre, desvincularPadre, reemitirCarnet };

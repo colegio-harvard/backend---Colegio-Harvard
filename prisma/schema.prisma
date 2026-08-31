@@ -85,6 +85,7 @@ model tbl_usuarios {
   alertas_operativas_creadas                tbl_alertas_operativas_alumno[]          @relation("alerta_operativa_creador")
   alertas_operativas_resueltas              tbl_alertas_operativas_alumno[]          @relation("alerta_operativa_resolutor")
   alertas_operativas_atendidas              tbl_alertas_operativas_alumno[]          @relation("alerta_operativa_atencion")
+  alumnos_siagie_actualizados               tbl_alumnos[]                            @relation("alumno_siagie_actualizador")
   tbl_roles                                 tbl_roles                               @relation(fields: [id_rol], references: [id], onDelete: NoAction)
 }
 
@@ -262,6 +263,9 @@ model tbl_alumnos {
   motivo_retiro          String?                  @db.VarChar(100)
   observacion_retiro     String?                  @db.VarChar(500)
   retirado_por           Int?
+  siagie_inscrito        Boolean                         @default(false)
+  siagie_actualizado_por Int?
+  siagie_actualizado_en  DateTime?                       @db.Timestamptz(6)
   id_aula                Int
   user_id_registration   Int?
   date_time_registration DateTime?                @default(now()) @db.Timestamptz(6)
@@ -278,6 +282,7 @@ model tbl_alumnos {
   tbl_padres_alumnos     tbl_padres_alumnos?
   tbl_reportes_semanales tbl_reportes_semanales[]
   tbl_alertas_operativas tbl_alertas_operativas_alumno[]
+  usuario_siagie         tbl_usuarios?                   @relation("alumno_siagie_actualizador", fields: [siagie_actualizado_por], references: [id], onDelete: NoAction)
 
   @@index([id_aula, estado], map: "idx_alumnos_aula_estado")
   @@index([nombre_completo], map: "idx_alumnos_nombre")
