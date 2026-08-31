@@ -82,6 +82,9 @@ model tbl_usuarios {
   tbl_compromisos_pago                      tbl_compromisos_pago[]
   tbl_cobranza_envios                       tbl_cobranza_envios[]
   tbl_reportes_semanales                    tbl_reportes_semanales[]
+  alertas_operativas_creadas                tbl_alertas_operativas_alumno[]          @relation("alerta_operativa_creador")
+  alertas_operativas_resueltas              tbl_alertas_operativas_alumno[]          @relation("alerta_operativa_resolutor")
+  alertas_operativas_atendidas              tbl_alertas_operativas_alumno[]          @relation("alerta_operativa_atencion")
   tbl_roles                                 tbl_roles                               @relation(fields: [id_rol], references: [id], onDelete: NoAction)
 }
 
@@ -274,6 +277,7 @@ model tbl_alumnos {
   tbl_hilos_mensaje      tbl_hilos_mensaje[]
   tbl_padres_alumnos     tbl_padres_alumnos?
   tbl_reportes_semanales tbl_reportes_semanales[]
+  tbl_alertas_operativas tbl_alertas_operativas_alumno[]
 
   @@index([id_aula, estado], map: "idx_alumnos_aula_estado")
   @@index([nombre_completo], map: "idx_alumnos_nombre")
@@ -651,6 +655,28 @@ model tbl_estado_pension {
 
   @@unique([id_alumno, clave_mes], map: "uq_alumno_mes")
   @@index([id_plantilla, estado, clave_mes], map: "idx_estado_pension_plantilla_estado_clave")
+}
+
+model tbl_alertas_operativas_alumno {
+  id                     Int           @id @default(autoincrement())
+  id_alumno              Int
+  mensaje                String        @db.VarChar(250)
+  prioridad              String        @default("URGENTE") @db.VarChar(20)
+  estado                 String        @default("ACTIVA") @db.VarChar(20)
+  creado_por             Int
+  resuelto_por           Int?
+  resuelta_en            DateTime?     @db.Timestamptz(6)
+  ultima_accion          String?       @db.VarChar(30)
+  ultima_accion_por      Int?
+  ultima_accion_en       DateTime?     @db.Timestamptz(6)
+  date_time_registration DateTime      @default(now()) @db.Timestamptz(6)
+  date_time_modification DateTime?     @db.Timestamptz(6)
+  tbl_alumnos            tbl_alumnos   @relation(fields: [id_alumno], references: [id], onDelete: Cascade)
+  usuario_creador        tbl_usuarios  @relation("alerta_operativa_creador", fields: [creado_por], references: [id], onDelete: NoAction)
+  usuario_resolutor      tbl_usuarios? @relation("alerta_operativa_resolutor", fields: [resuelto_por], references: [id], onDelete: NoAction)
+  usuario_atencion       tbl_usuarios? @relation("alerta_operativa_atencion", fields: [ultima_accion_por], references: [id], onDelete: NoAction)
+
+  @@index([id_alumno, estado], map: "idx_alerta_operativa_alumno_estado")
 }
 
 model tbl_compromisos_pago {
