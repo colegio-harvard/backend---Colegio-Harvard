@@ -656,6 +656,7 @@ const obtenerCarnet = async (req, res) => {
         alumno: {
           nombre_completo: alumno.nombre_completo,
           codigo_alumno: alumno.codigo_alumno,
+          dni: alumno.dni,
           foto_url: alumno.foto_url,
           aula: `${alumno.tbl_aulas?.tbl_grados?.nombre || ''} ${alumno.tbl_aulas?.seccion || ''}`.trim(),
           nivel: alumno.tbl_aulas?.tbl_grados?.tbl_niveles?.nombre || '',
