@@ -252,7 +252,11 @@ async function obtenerPublica(req, res) {
       ? formularioGuardado
       : { ...formularioGuardado, ...borrador };
     const datos = json(item.datos_snapshot, {});
-    res.json({ data: { codigo: item.codigo, estado: item.estado, anio: item.anio, datos, formulario, preparado_por_colegio: Object.keys(borrador).length > 0, borrador_preparado_en: item.borrador_preparado_en, documentos: json(item.documentos_snapshot, []), aceptaciones: json(item.aceptaciones_json, {}), deuda: Number(item.deuda_snapshot || 0), matricula: Number(item.costo_matricula_snapshot || datos.alumno?.monto_matricula || 0), pension: Number(datos.alumno?.monto_pension || 0), materiales: Number(datos.alumno?.monto_materiales || 0), aceptado_en: item.aceptado_en, hash_evidencia: item.hash_evidencia, observacion_revision: item.observacion_revision } });
+    const controlDocumental = json(item.control_documental, {});
+    const controlDocumentalPublico = Object.fromEntries(Object.entries(controlDocumental).map(([clave, valor]) => [clave, {
+      estado: ['ENTREGADO', 'PENDIENTE', 'NO_APLICA'].includes(valor?.estado) ? valor.estado : 'PENDIENTE',
+    }]));
+    res.json({ data: { codigo: item.codigo, estado: item.estado, anio: item.anio, datos, formulario, preparado_por_colegio: Object.keys(borrador).length > 0, borrador_preparado_en: item.borrador_preparado_en, documentos: json(item.documentos_snapshot, []), aceptaciones: json(item.aceptaciones_json, {}), control_documental: controlDocumentalPublico, deuda: Number(item.deuda_snapshot || 0), matricula: Number(item.costo_matricula_snapshot || datos.alumno?.monto_matricula || 0), pension: Number(datos.alumno?.monto_pension || 0), materiales: Number(datos.alumno?.monto_materiales || 0), aceptado_en: item.aceptado_en, hash_evidencia: item.hash_evidencia, observacion_revision: item.observacion_revision } });
   } catch (error) {
     console.error('Error consulta matrícula pública:', error);
     res.status(500).json({ error: 'No se pudo consultar la matrícula' });
