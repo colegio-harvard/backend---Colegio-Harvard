@@ -844,23 +844,25 @@ model tbl_inventario_variantes {
 }
 
 model tbl_inventario_ventas {
-  id             Int                          @id @default(autoincrement())
-  codigo         String                       @unique @db.VarChar(40)
-  id_alumno      Int?
-  tipo           String                       @default("VENTA") @db.VarChar(20)
-  estado_pago    String                       @default("PENDIENTE") @db.VarChar(20)
-  total          Decimal                      @db.Decimal(10, 2)
-  monto_pagado   Decimal                      @default(0) @db.Decimal(10, 2)
-  saldo          Decimal                      @default(0) @db.Decimal(10, 2)
-  medio_pago     String?                      @db.VarChar(30)
-  recibido_por   String?                      @db.VarChar(150)
-  observacion    String?                      @db.VarChar(500)
-  registrado_por Int
-  fecha          DateTime                     @default(now()) @db.Timestamptz(6)
-  alumno         tbl_alumnos?                 @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
-  usuario        tbl_usuarios                 @relation(fields: [registrado_por], references: [id], onDelete: NoAction)
-  items          tbl_inventario_venta_items[]
-  movimientos    tbl_inventario_movimientos[]
+  id                Int                          @id @default(autoincrement())
+  codigo            String                       @unique @db.VarChar(40)
+  id_alumno         Int?
+  tipo              String                       @default("VENTA") @db.VarChar(20)
+  estado_pago       String                       @default("PENDIENTE") @db.VarChar(20)
+  total             Decimal                      @db.Decimal(10, 2)
+  monto_pagado      Decimal                      @default(0) @db.Decimal(10, 2)
+  saldo             Decimal                      @default(0) @db.Decimal(10, 2)
+  medio_pago        String?                      @db.VarChar(30)
+  recibido_por      String?                      @db.VarChar(150)
+  comprador_nombre  String?                      @db.VarChar(150)
+  comprador_celular String?                      @db.VarChar(20)
+  observacion       String?                      @db.VarChar(500)
+  registrado_por    Int
+  fecha             DateTime                     @default(now()) @db.Timestamptz(6)
+  alumno            tbl_alumnos?                 @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
+  usuario           tbl_usuarios                 @relation(fields: [registrado_por], references: [id], onDelete: NoAction)
+  items             tbl_inventario_venta_items[]
+  movimientos       tbl_inventario_movimientos[]
 
   @@index([fecha])
   @@index([id_alumno, estado_pago])

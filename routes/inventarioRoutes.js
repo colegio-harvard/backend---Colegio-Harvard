@@ -4,6 +4,7 @@ const verificarRol = require('../middleware/rbacMiddleware');
 const ctrl = require('../controllers/inventarioController');
 
 const router = express.Router();
+router.get('/recibo/:codigo', ctrl.obtenerRecibo);
 router.use(verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'));
 router.get('/resumen', ctrl.resumen);
 router.get('/productos', ctrl.listarProductos);

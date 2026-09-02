@@ -152,10 +152,21 @@ exports.listarMovimientos = async (_req, res) => {
 
 exports.crearVenta = async (req, res) => {
   try {
-    const { id_alumno, tipo = 'VENTA', monto_pagado = 0, medio_pago, recibido_por, observacion, items = [] } = req.body;
+    const { id_alumno, tipo = 'VENTA', monto_pagado = 0, medio_pago, recibido_por, comprador_nombre, comprador_celular, observacion, items = [] } = req.body;
     if (!['VENTA', 'GRATUITA', 'RESERVA'].includes(tipo)) return res.status(400).json({ error: 'Tipo de operación inválido' });
     if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Agregue al menos un producto' });
+    const celularLimpio = String(comprador_celular || '').replace(/\D/g, '');
+    if (!id_alumno && !comprador_nombre?.trim()) return res.status(400).json({ error: 'Ingrese el nombre del comprador' });
+    if (celularLimpio && !/^(?:51)?9\d{8}$/.test(celularLimpio)) return res.status(400).json({ error: 'Ingrese un celular peruano válido de 9 dígitos' });
     const venta = await prisma.$transaction(async tx => {
+      const alumno = id_alumno ? await tx.tbl_alumnos.findUnique({
+        where: { id: Number(id_alumno) },
+        include: { tbl_padres_alumnos: { include: { tbl_padres: { select: { nombre_completo: true, celular: true } } } } },
+      }) : null;
+      if (id_alumno && !alumno) throw new Error('Alumno no encontrado');
+      const apoderado = alumno?.tbl_padres_alumnos?.tbl_padres;
+      const nombreComprador = comprador_nombre?.trim() || apoderado?.nombre_completo || alumno?.nombre_completo || null;
+      const celularComprador = celularLimpio || String(apoderado?.celular || '').replace(/\D/g, '') || null;
       const ids = [...new Set(items.map(x => Number(x.id_variante)))];
       const variantes = await tx.tbl_inventario_variantes.findMany({ where: { id: { in: ids }, activo: true }, include: { producto: true } });
       if (variantes.length !== ids.length) throw new Error('Uno de los productos ya no está disponible');
@@ -171,7 +182,7 @@ exports.crearVenta = async (req, res) => {
       const pagado = tipo === 'GRATUITA' ? 0 : Math.min(numero(monto_pagado, 'Monto pagado'), total);
       const saldo = total - pagado;
       const estadoPago = tipo === 'GRATUITA' ? 'NO_APLICA' : saldo <= 0 ? 'PAGADO' : pagado > 0 ? 'PARCIAL' : 'PENDIENTE';
-      const creada = await tx.tbl_inventario_ventas.create({ data: { codigo: codigoVenta(), id_alumno: id_alumno ? Number(id_alumno) : null, tipo, estado_pago: estadoPago, total, monto_pagado: pagado, saldo, medio_pago: medio_pago || null, recibido_por: recibido_por?.trim() || null, observacion: observacion?.trim() || null, registrado_por: req.user.id } });
+      const creada = await tx.tbl_inventario_ventas.create({ data: { codigo: codigoVenta(), id_alumno: id_alumno ? Number(id_alumno) : null, tipo, estado_pago: estadoPago, total, monto_pagado: pagado, saldo, medio_pago: medio_pago || null, recibido_por: recibido_por?.trim() || null, comprador_nombre: nombreComprador, comprador_celular: celularComprador, observacion: observacion?.trim() || null, registrado_por: req.user.id } });
       for (const detalle of detalles) {
         const descuento = await tx.tbl_inventario_variantes.updateMany({ where: { id: detalle.variante.id, stock: { gte: detalle.cantidad } }, data: { stock: { decrement: detalle.cantidad } } });
         if (descuento.count !== 1) throw new Error(`El stock de ${detalle.variante.producto.nombre} cambió; revise la cantidad disponible`);
@@ -184,6 +195,17 @@ exports.crearVenta = async (req, res) => {
     await registrarAuditoria({ userId: req.user.id, accion: 'REGISTRAR_VENTA_INVENTARIO', tipoEntidad: 'tbl_inventario_ventas', idEntidad: venta.id, resumen: `Operación ${venta.codigo} registrada por S/ ${venta.total}`, req });
     res.status(201).json({ data: venta });
   } catch (error) { console.error(error); res.status(400).json({ error: error.message || 'No se pudo registrar la venta' }); }
+};
+
+exports.obtenerRecibo = async (req, res) => {
+  try {
+    const venta = await prisma.tbl_inventario_ventas.findUnique({
+      where: { codigo: req.params.codigo },
+      include: { alumno: { select: { codigo_alumno: true, nombre_completo: true, dni: true } }, items: { include: { variante: { include: { producto: true } } } }, usuario: { select: { nombres: true } } },
+    });
+    if (!venta) return res.status(404).json({ error: 'Recibo no encontrado' });
+    res.json({ data: venta });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo consultar el recibo' }); }
 };
 
 exports.listarVentas = async (_req, res) => {
