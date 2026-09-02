@@ -15,6 +15,22 @@ const numero = (valor, nombre, minimo = 0) => {
 
 const codigoVenta = () => `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
+const partesCodigo = value => String(value || '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(/\s+/)
+  .filter(Boolean).slice(0, 2).map(parte => parte.slice(0, 3)).join('-');
+
+const codigoDisponible = async (tx, modelo, campo, base, maximo) => {
+  const limpio = String(base || 'ITEM').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, maximo);
+  let candidato = limpio;
+  let consecutivo = 2;
+  while (await tx[modelo].findUnique({ where: { [campo]: candidato }, select: { id: true } })) {
+    const sufijo = `-${consecutivo++}`;
+    candidato = `${limpio.slice(0, maximo - sufijo.length)}${sufijo}`;
+  }
+  return candidato;
+};
+
 exports.resumen = async (_req, res) => {
   try {
     const [productos, ventasHoy, pendientes] = await Promise.all([
@@ -56,19 +72,21 @@ exports.listarProductos = async (req, res) => {
 exports.crearProducto = async (req, res) => {
   try {
     const { codigo, nombre, categoria, descripcion, precio_venta, costo_compra, stock_minimo = 3, foto_url, variantes = [] } = req.body;
-    if (!codigo?.trim() || !nombre?.trim() || !categoria?.trim()) return res.status(400).json({ error: 'Código, nombre y categoría son obligatorios' });
+    if (!nombre?.trim() || !categoria?.trim()) return res.status(400).json({ error: 'Nombre y categoría son obligatorios' });
     if (!Array.isArray(variantes) || !variantes.length) return res.status(400).json({ error: 'Agregue al menos una talla o variante' });
     const producto = await prisma.$transaction(async tx => {
+      const codigoProducto = codigo?.trim().toUpperCase() || await codigoDisponible(tx, 'tbl_inventario_productos', 'codigo', `${partesCodigo(categoria)}-${partesCodigo(nombre)}`, 50);
       const creado = await tx.tbl_inventario_productos.create({ data: {
-        codigo: codigo.trim().toUpperCase(), nombre: nombre.trim(), categoria: categoria.trim(), descripcion: descripcion?.trim() || null,
+        codigo: codigoProducto, nombre: nombre.trim(), categoria: categoria.trim(), descripcion: descripcion?.trim() || null,
         precio_venta: numero(precio_venta, 'Precio de venta'), costo_compra: costo_compra === '' || costo_compra == null ? null : numero(costo_compra, 'Costo de compra'),
         stock_minimo: Math.trunc(numero(stock_minimo, 'Stock mínimo')), foto_url: foto_url?.trim() || null, user_id_registration: req.user.id,
       } });
       for (const item of variantes) {
         const stock = Math.trunc(numero(item.stock || 0, 'Stock'));
+        const nombreVariante = String(item.nombre || 'Única').trim();
+        const sku = item.sku?.trim().toUpperCase() || await codigoDisponible(tx, 'tbl_inventario_variantes', 'sku', `${codigoProducto}-${partesCodigo(nombreVariante) || 'UNICA'}`, 80);
         const variante = await tx.tbl_inventario_variantes.create({ data: {
-          id_producto: creado.id, nombre: String(item.nombre || 'Única').trim(),
-          sku: String(item.sku || `${codigo}-${item.nombre || 'UNICA'}`).trim().toUpperCase(), stock,
+          id_producto: creado.id, nombre: nombreVariante, sku, stock,
           stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')),
         } });
         if (stock > 0) await tx.tbl_inventario_movimientos.create({ data: { id_variante: variante.id, tipo: 'INGRESO', cantidad: stock, stock_anterior: 0, stock_nuevo: stock, observacion: 'Stock inicial', registrado_por: req.user.id } });
@@ -96,7 +114,11 @@ exports.actualizarProducto = async (req, res) => {
       } });
       for (const item of variantes) {
         if (item.id) await tx.tbl_inventario_variantes.update({ where: { id: Number(item.id) }, data: { nombre: item.nombre.trim(), sku: item.sku.trim().toUpperCase(), stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')), activo: item.activo !== false } });
-        else await tx.tbl_inventario_variantes.create({ data: { id_producto: id, nombre: item.nombre.trim(), sku: item.sku.trim().toUpperCase(), stock: 0, stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')) } });
+        else {
+          const productoActual = await tx.tbl_inventario_productos.findUnique({ where: { id }, select: { codigo: true } });
+          const sku = item.sku?.trim().toUpperCase() || await codigoDisponible(tx, 'tbl_inventario_variantes', 'sku', `${productoActual.codigo}-${partesCodigo(item.nombre) || 'UNICA'}`, 80);
+          await tx.tbl_inventario_variantes.create({ data: { id_producto: id, nombre: item.nombre.trim(), sku, stock: 0, stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')) } });
+        }
       }
       return tx.tbl_inventario_productos.findUnique({ where: { id }, include: productoInclude });
     });
