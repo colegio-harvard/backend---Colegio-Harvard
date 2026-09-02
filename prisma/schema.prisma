@@ -82,10 +82,12 @@ model tbl_usuarios {
   tbl_compromisos_pago                      tbl_compromisos_pago[]
   tbl_cobranza_envios                       tbl_cobranza_envios[]
   tbl_reportes_semanales                    tbl_reportes_semanales[]
-  alertas_operativas_creadas                tbl_alertas_operativas_alumno[]          @relation("alerta_operativa_creador")
-  alertas_operativas_resueltas              tbl_alertas_operativas_alumno[]          @relation("alerta_operativa_resolutor")
-  alertas_operativas_atendidas              tbl_alertas_operativas_alumno[]          @relation("alerta_operativa_atencion")
-  alumnos_siagie_actualizados               tbl_alumnos[]                            @relation("alumno_siagie_actualizador")
+  alertas_operativas_creadas                tbl_alertas_operativas_alumno[]         @relation("alerta_operativa_creador")
+  alertas_operativas_resueltas              tbl_alertas_operativas_alumno[]         @relation("alerta_operativa_resolutor")
+  alertas_operativas_atendidas              tbl_alertas_operativas_alumno[]         @relation("alerta_operativa_atencion")
+  alumnos_siagie_actualizados               tbl_alumnos[]                           @relation("alumno_siagie_actualizador")
+  inventario_movimientos                    tbl_inventario_movimientos[]
+  inventario_ventas                         tbl_inventario_ventas[]
   tbl_roles                                 tbl_roles                               @relation(fields: [id_rol], references: [id], onDelete: NoAction)
 }
 
@@ -246,34 +248,34 @@ model tbl_padres {
 }
 
 model tbl_alumnos {
-  id                     Int                      @id @default(autoincrement())
-  codigo_alumno          String                   @unique @db.VarChar(50)
-  dni                    String?                  @unique @db.VarChar(20)
-  nombre_completo        String                   @db.VarChar(200)
-  apellido_paterno       String?                  @db.VarChar(100)
-  apellido_materno       String?                  @db.VarChar(100)
-  nombres                String?                  @db.VarChar(150)
+  id                     Int                             @id @default(autoincrement())
+  codigo_alumno          String                          @unique @db.VarChar(50)
+  dni                    String?                         @unique @db.VarChar(20)
+  nombre_completo        String                          @db.VarChar(200)
+  apellido_paterno       String?                         @db.VarChar(100)
+  apellido_materno       String?                         @db.VarChar(100)
+  nombres                String?                         @db.VarChar(150)
   foto_url               String?
   foto_carnet_url        String?
-  monto_matricula        Decimal?                 @db.Decimal(10, 2)
-  monto_materiales       Decimal?                 @db.Decimal(10, 2)
-  monto_pension          Decimal?                 @db.Decimal(10, 2)
-  estado                 String                   @default("ACTIVO") @db.VarChar(20)
-  fecha_retiro           DateTime?                @db.Date
-  ultima_clave_cobro     String?                  @db.VarChar(20)
-  motivo_retiro          String?                  @db.VarChar(100)
-  observacion_retiro     String?                  @db.VarChar(500)
+  monto_matricula        Decimal?                        @db.Decimal(10, 2)
+  monto_materiales       Decimal?                        @db.Decimal(10, 2)
+  monto_pension          Decimal?                        @db.Decimal(10, 2)
+  estado                 String                          @default("ACTIVO") @db.VarChar(20)
+  fecha_retiro           DateTime?                       @db.Date
+  ultima_clave_cobro     String?                         @db.VarChar(20)
+  motivo_retiro          String?                         @db.VarChar(100)
+  observacion_retiro     String?                         @db.VarChar(500)
   retirado_por           Int?
   siagie_inscrito        Boolean                         @default(false)
   siagie_actualizado_por Int?
   siagie_actualizado_en  DateTime?                       @db.Timestamptz(6)
   id_aula                Int
   user_id_registration   Int?
-  date_time_registration DateTime?                @default(now()) @db.Timestamptz(6)
+  date_time_registration DateTime?                       @default(now()) @db.Timestamptz(6)
   user_id_modification   Int?
-  date_time_modification DateTime?                @db.Timestamptz(6)
+  date_time_modification DateTime?                       @db.Timestamptz(6)
   tbl_alertas            tbl_alertas[]
-  tbl_aulas              tbl_aulas                @relation(fields: [id_aula], references: [id], onDelete: NoAction)
+  tbl_aulas              tbl_aulas                       @relation(fields: [id_aula], references: [id], onDelete: NoAction)
   tbl_asistencia_dia     tbl_asistencia_dia[]
   tbl_carnets            tbl_carnets?
   tbl_entradas_agenda    tbl_entradas_agenda[]
@@ -284,6 +286,7 @@ model tbl_alumnos {
   tbl_reportes_semanales tbl_reportes_semanales[]
   tbl_alertas_operativas tbl_alertas_operativas_alumno[]
   usuario_siagie         tbl_usuarios?                   @relation("alumno_siagie_actualizador", fields: [siagie_actualizado_por], references: [id], onDelete: NoAction)
+  inventario_ventas      tbl_inventario_ventas[]
 
   @@index([id_aula, estado], map: "idx_alumnos_aula_estado")
   @@index([nombre_completo], map: "idx_alumnos_nombre")
@@ -639,25 +642,25 @@ model tbl_plantilla_pension {
 }
 
 model tbl_estado_pension {
-  id                     Int                   @id @default(autoincrement())
-  id_plantilla           Int
-  id_alumno              Int
-  clave_mes              String                @db.VarChar(20)
-  actualizado_por        Int
-  user_id_registration   Int?
-  date_time_registration DateTime?             @default(now()) @db.Timestamptz(6)
-  user_id_modification   Int?
-  date_time_modification DateTime?             @db.Timestamptz(6)
-  estado                       String                @default("PENDIENTE") @db.VarChar(20)
-  monto_total                  Decimal?              @db.Decimal(10, 2)
-  monto_pagado                 Decimal               @default(0) @db.Decimal(10, 2)
-  observacion_no_corresponde   String?               @db.VarChar(255)
-  tbl_usuarios                 tbl_usuarios          @relation(fields: [actualizado_por], references: [id], onDelete: NoAction)
-  tbl_alumnos            tbl_alumnos           @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
-  tbl_plantilla_pension  tbl_plantilla_pension @relation(fields: [id_plantilla], references: [id], onDelete: NoAction)
-  tbl_pagos_pension      tbl_pagos_pension[]
-  tbl_compromisos_pago   tbl_compromisos_pago[]
-  tbl_cobranza_envios    tbl_cobranza_envios[]
+  id                         Int                    @id @default(autoincrement())
+  id_plantilla               Int
+  id_alumno                  Int
+  clave_mes                  String                 @db.VarChar(20)
+  actualizado_por            Int
+  user_id_registration       Int?
+  date_time_registration     DateTime?              @default(now()) @db.Timestamptz(6)
+  user_id_modification       Int?
+  date_time_modification     DateTime?              @db.Timestamptz(6)
+  estado                     String                 @default("PENDIENTE") @db.VarChar(20)
+  monto_total                Decimal?               @db.Decimal(10, 2)
+  monto_pagado               Decimal                @default(0) @db.Decimal(10, 2)
+  observacion_no_corresponde String?                @db.VarChar(255)
+  tbl_usuarios               tbl_usuarios           @relation(fields: [actualizado_por], references: [id], onDelete: NoAction)
+  tbl_alumnos                tbl_alumnos            @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
+  tbl_plantilla_pension      tbl_plantilla_pension  @relation(fields: [id_plantilla], references: [id], onDelete: NoAction)
+  tbl_pagos_pension          tbl_pagos_pension[]
+  tbl_compromisos_pago       tbl_compromisos_pago[]
+  tbl_cobranza_envios        tbl_cobranza_envios[]
 
   @@unique([id_alumno, clave_mes], map: "uq_alumno_mes")
   @@index([id_plantilla, estado, clave_mes], map: "idx_estado_pension_plantilla_estado_clave")
@@ -802,3 +805,96 @@ model tbl_destinatarios_notif_personalizada {
   @@unique([id_notif_personalizada, id_usuario], map: "uq_notif_personal_usuario")
 }
 
+model tbl_inventario_productos {
+  id                     Int                        @id @default(autoincrement())
+  codigo                 String                     @unique @db.VarChar(50)
+  nombre                 String                     @db.VarChar(150)
+  categoria              String                     @db.VarChar(80)
+  descripcion            String?                    @db.VarChar(500)
+  precio_venta           Decimal                    @db.Decimal(10, 2)
+  costo_compra           Decimal?                   @db.Decimal(10, 2)
+  stock_minimo           Int                        @default(3)
+  foto_url               String?
+  activo                 Boolean                    @default(true)
+  user_id_registration   Int?
+  date_time_registration DateTime                   @default(now()) @db.Timestamptz(6)
+  user_id_modification   Int?
+  date_time_modification DateTime?                  @db.Timestamptz(6)
+  variantes              tbl_inventario_variantes[]
+
+  @@index([categoria, activo])
+  @@index([nombre])
+}
+
+model tbl_inventario_variantes {
+  id                     Int                          @id @default(autoincrement())
+  id_producto            Int
+  nombre                 String                       @db.VarChar(80)
+  sku                    String                       @unique @db.VarChar(80)
+  stock                  Int                          @default(0)
+  stock_minimo           Int?
+  activo                 Boolean                      @default(true)
+  date_time_registration DateTime                     @default(now()) @db.Timestamptz(6)
+  producto               tbl_inventario_productos     @relation(fields: [id_producto], references: [id], onDelete: Cascade)
+  movimientos            tbl_inventario_movimientos[]
+  venta_items            tbl_inventario_venta_items[]
+
+  @@unique([id_producto, nombre])
+  @@index([id_producto, activo])
+}
+
+model tbl_inventario_ventas {
+  id             Int                          @id @default(autoincrement())
+  codigo         String                       @unique @db.VarChar(40)
+  id_alumno      Int?
+  tipo           String                       @default("VENTA") @db.VarChar(20)
+  estado_pago    String                       @default("PENDIENTE") @db.VarChar(20)
+  total          Decimal                      @db.Decimal(10, 2)
+  monto_pagado   Decimal                      @default(0) @db.Decimal(10, 2)
+  saldo          Decimal                      @default(0) @db.Decimal(10, 2)
+  medio_pago     String?                      @db.VarChar(30)
+  recibido_por   String?                      @db.VarChar(150)
+  observacion    String?                      @db.VarChar(500)
+  registrado_por Int
+  fecha          DateTime                     @default(now()) @db.Timestamptz(6)
+  alumno         tbl_alumnos?                 @relation(fields: [id_alumno], references: [id], onDelete: NoAction)
+  usuario        tbl_usuarios                 @relation(fields: [registrado_por], references: [id], onDelete: NoAction)
+  items          tbl_inventario_venta_items[]
+  movimientos    tbl_inventario_movimientos[]
+
+  @@index([fecha])
+  @@index([id_alumno, estado_pago])
+}
+
+model tbl_inventario_venta_items {
+  id              Int                      @id @default(autoincrement())
+  id_venta        Int
+  id_variante     Int
+  cantidad        Int
+  precio_unitario Decimal                  @db.Decimal(10, 2)
+  subtotal        Decimal                  @db.Decimal(10, 2)
+  venta           tbl_inventario_ventas    @relation(fields: [id_venta], references: [id], onDelete: Cascade)
+  variante        tbl_inventario_variantes @relation(fields: [id_variante], references: [id], onDelete: NoAction)
+
+  @@index([id_venta])
+  @@index([id_variante])
+}
+
+model tbl_inventario_movimientos {
+  id             Int                      @id @default(autoincrement())
+  id_variante    Int
+  id_venta       Int?
+  tipo           String                   @db.VarChar(20)
+  cantidad       Int
+  stock_anterior Int
+  stock_nuevo    Int
+  observacion    String?                  @db.VarChar(500)
+  registrado_por Int
+  fecha          DateTime                 @default(now()) @db.Timestamptz(6)
+  variante       tbl_inventario_variantes @relation(fields: [id_variante], references: [id], onDelete: NoAction)
+  venta          tbl_inventario_ventas?   @relation(fields: [id_venta], references: [id], onDelete: SetNull)
+  usuario        tbl_usuarios             @relation(fields: [registrado_por], references: [id], onDelete: NoAction)
+
+  @@index([id_variante, fecha])
+  @@index([tipo, fecha])
+}
