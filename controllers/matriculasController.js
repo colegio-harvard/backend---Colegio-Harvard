@@ -314,7 +314,7 @@ async function aceptar(req, res) {
     const personaPrincipal = formulario.persona_autorizada_1 || {};
     if (!String(personaPrincipal.nombre || '').trim() || !String(personaPrincipal.parentesco || '').trim() || !String(personaPrincipal.celular || '').trim() || !/^\d{8}$/.test(String(personaPrincipal.dni || ''))) return res.status(400).json({ error: 'Complete nombre, DNI de 8 dígitos, parentesco y celular de la persona principal autorizada para recoger al estudiante' });
     const tiposIngreso = ['PROMOCION_INTERNA', 'TRASLADO', 'INGRESO_INICIAL', 'REPITENCIA'];
-    const condicionesPromocion = ['PROMOVIDO', 'REPITE', 'PENDIENTE'];
+    const condicionesPromocion = ['PROMOVIDO', 'REPITE', 'PENDIENTE', 'UBICACION'];
     if (!tiposIngreso.includes(formulario.tipo_ingreso)) return res.status(400).json({ error: 'Seleccione el tipo de ingreso del estudiante' });
     if (formulario.tipo_ingreso !== 'INGRESO_INICIAL') {
       if (!condicionesPromocion.includes(formulario.condicion_promocion) || !/^\d{4}$/.test(String(formulario.anio_escolar_anterior || '')) || !String(formulario.nivel_anterior || '').trim() || !String(formulario.grado_anterior || '').trim()) return res.status(400).json({ error: 'Complete la condición de promoción y el antecedente escolar' });
