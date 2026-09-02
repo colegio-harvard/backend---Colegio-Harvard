@@ -316,6 +316,7 @@ async function aceptar(req, res) {
     const tiposIngreso = ['PROMOCION_INTERNA', 'TRASLADO', 'INGRESO_INICIAL', 'REPITENCIA'];
     const condicionesPromocion = ['PROMOVIDO', 'REPITE', 'PENDIENTE', 'UBICACION'];
     if (!tiposIngreso.includes(formulario.tipo_ingreso)) return res.status(400).json({ error: 'Seleccione el tipo de ingreso del estudiante' });
+    if (!['SI', 'NO'].includes(formulario.autoriza_salida_solo)) return res.status(400).json({ error: 'Indique si autoriza que el estudiante salga solo del colegio' });
     if (formulario.tipo_ingreso !== 'INGRESO_INICIAL') {
       if (!condicionesPromocion.includes(formulario.condicion_promocion) || !/^\d{4}$/.test(String(formulario.anio_escolar_anterior || '')) || !String(formulario.nivel_anterior || '').trim() || !String(formulario.grado_anterior || '').trim()) return res.status(400).json({ error: 'Complete la condición de promoción y el antecedente escolar' });
       if (formulario.tipo_ingreso === 'TRASLADO' && !String(formulario.institucion_procedencia || '').trim()) return res.status(400).json({ error: 'Indique la institución educativa de procedencia' });
