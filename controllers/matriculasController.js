@@ -399,13 +399,13 @@ async function guardarComplementoAdministrativo(req, res) {
     if (complemento.tipo_ingreso === 'TRASLADO' && complemento.institucion_procedencia.toLocaleLowerCase('es') === 'colegio harvard') return res.status(400).json({ error: 'En un traslado, la institución de procedencia no puede ser Colegio Harvard' });
     const rows = await prisma.$transaction(async (tx) => {
       const matriculas = await tx.$queryRawUnsafe(`SELECT id,id_alumno,id_anio_escolar,estado FROM "tbl_matriculas_digitales" WHERE id=$1 FOR UPDATE`, matriculaId);
-      if (!matriculas[0] || matriculas[0].estado !== 'COMPLETADA') return [];
+      if (!matriculas[0] || !['ACEPTADA', 'COMPLETADA'].includes(matriculas[0].estado)) return [];
       const aulas = await tx.$queryRawUnsafe(`SELECT a.id,a.id_grado,g.id_nivel FROM "tbl_aulas" a JOIN "tbl_grados" g ON g.id=a.id_grado WHERE a.id=$1 AND a.id_anio_escolar=$2`, idAulaActual, matriculas[0].id_anio_escolar);
       if (!aulas[0]) throw Object.assign(new Error('AULA_ACTUAL_INVALIDA'), { statusCode: 400 });
       await tx.$executeRawUnsafe(`UPDATE "tbl_alumnos" SET id_aula=$1,user_id_modification=$2,date_time_modification=NOW() WHERE id=$3`, idAulaActual, req.user.id, matriculas[0].id_alumno);
       return tx.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET complemento_administrativo=$1::jsonb,motivo_complemento=$2,complementado_por=$3,complementado_en=NOW(),actualizado_por=$3,actualizado_en=NOW() WHERE id=$4 RETURNING id,codigo,estado,complemento_administrativo,motivo_complemento,complementado_por,complementado_en`, JSON.stringify(complemento), motivo, req.user.id, matriculaId);
     });
-    if (!rows[0]) return res.status(409).json({ error: 'Solo se puede complementar una matrícula completada' });
+    if (!rows[0]) return res.status(409).json({ error: 'Solo se puede corregir administrativamente una matrícula aceptada o completada' });
     const camposActualizados = Object.keys(complemento).filter((campo) => JSON.stringify(complemento[campo]) !== JSON.stringify('') && JSON.stringify(complemento[campo]) !== JSON.stringify({ nombre: '', dni: '', parentesco: '', celular: '' }));
     await registrarEvento(matriculaId, 'COMPLEMENTO_ADMINISTRATIVO_ACTUALIZADO', { motivo, campos: camposActualizados }, req, req.user.id);
     await registrarAuditoria({ userId: req.user.id, accion: 'COMPLEMENTAR_MATRICULA_COMPLETADA', tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matriculaId, resumen: `Complemento administrativo de ${rows[0].codigo}: ${motivo}`, req });
