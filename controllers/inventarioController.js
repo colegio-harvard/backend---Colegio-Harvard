@@ -215,6 +215,52 @@ exports.listarVentas = async (_req, res) => {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron cargar las ventas' }); }
 };
 
+const construirReporte = async (query = {}) => {
+  const where = { tipo: { not: 'RESERVA' } };
+  if (query.desde || query.hasta) {
+    where.fecha = {};
+    if (query.desde) where.fecha.gte = new Date(`${query.desde}T00:00:00-05:00`);
+    if (query.hasta) where.fecha.lte = new Date(`${query.hasta}T23:59:59.999-05:00`);
+  }
+  if (query.medio_pago) where.medio_pago = query.medio_pago;
+  const ventas = await prisma.tbl_inventario_ventas.findMany({
+    where,
+    include: { alumno: { select: { codigo_alumno: true, nombre_completo: true } }, usuario: { select: { nombres: true } }, items: { include: { variante: { include: { producto: true } } } } },
+    orderBy: { fecha: 'desc' },
+  });
+  const operaciones = ventas.map(venta => {
+    const items = venta.items.filter(item => (!query.categoria || item.variante.producto.categoria === query.categoria) && (!query.id_producto || item.variante.producto.id === Number(query.id_producto)));
+    if (!items.length) return null;
+    const totalFiltrado = items.reduce((s, item) => s + Number(item.subtotal), 0);
+    const proporcion = Number(venta.total) > 0 ? totalFiltrado / Number(venta.total) : 0;
+    const pagado = Number(venta.monto_pagado) * proporcion;
+    const costo = items.reduce((s, item) => s + Number(item.variante.producto.costo_compra || 0) * item.cantidad, 0);
+    return { ...venta, items, total_reporte: totalFiltrado, pagado_reporte: pagado, saldo_reporte: Math.max(0, totalFiltrado - pagado), costo_reporte: costo, utilidad_reporte: totalFiltrado - costo };
+  }).filter(Boolean);
+  const sumar = campo => operaciones.reduce((s, venta) => s + Number(venta[campo] || 0), 0);
+  const porMedio = Object.entries(operaciones.reduce((acc, venta) => { const key = venta.medio_pago || 'SIN ESPECIFICAR'; acc[key] = (acc[key] || 0) + venta.pagado_reporte; return acc; }, {})).map(([medio, monto]) => ({ medio, monto }));
+  const porCategoria = Object.entries(operaciones.flatMap(v => v.items).reduce((acc, item) => { const key = item.variante.producto.categoria; acc[key] = (acc[key] || 0) + Number(item.subtotal); return acc; }, {})).map(([categoria, total]) => ({ categoria, total }));
+  return { resumen: { operaciones: operaciones.length, ventas: sumar('total_reporte'), ingresos: sumar('pagado_reporte'), pendientes: sumar('saldo_reporte'), costos: sumar('costo_reporte'), utilidad_estimada: sumar('utilidad_reporte') }, por_medio: porMedio, por_categoria: porCategoria, operaciones };
+};
+
+exports.reporteEconomico = async (req, res) => {
+  try { res.json({ data: await construirReporte(req.query) }); }
+  catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo generar el reporte económico de inventario' }); }
+};
+
+exports.exportarReporte = async (req, res) => {
+  try {
+    const reporte = await construirReporte(req.query);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{ Concepto: 'Total vendido', Monto: reporte.resumen.ventas }, { Concepto: 'Ingresos cobrados', Monto: reporte.resumen.ingresos }, { Concepto: 'Saldos pendientes', Monto: reporte.resumen.pendientes }, { Concepto: 'Costo estimado', Monto: reporte.resumen.costos }, { Concepto: 'Utilidad estimada', Monto: reporte.resumen.utilidad_estimada }]), 'Resumen económico');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reporte.operaciones.map(v => ({ Fecha: v.fecha, Código: v.codigo, Comprador: v.comprador_nombre || v.alumno?.nombre_completo || '', Productos: v.items.map(i => `${i.variante.producto.nombre} ${i.variante.nombre} x${i.cantidad}`).join(', '), 'Medio de pago': v.medio_pago || '', Vendido: v.total_reporte, Cobrado: v.pagado_reporte, Pendiente: v.saldo_reporte, Costo: v.costo_reporte, 'Utilidad estimada': v.utilidad_reporte, Usuario: v.usuario.nombres }))), 'Operaciones');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(reporte.por_medio.map(x => ({ 'Medio de pago': x.medio, 'Monto cobrado': x.monto }))), 'Medios de pago');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', `attachment; filename="reporte-economico-inventario-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(buffer);
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo exportar el reporte económico' }); }
+};
+
 exports.exportar = async (_req, res) => {
   try {
     const [productos, movimientos, ventas] = await Promise.all([

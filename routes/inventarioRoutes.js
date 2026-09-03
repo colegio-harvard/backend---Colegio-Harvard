@@ -14,6 +14,8 @@ router.get('/movimientos', ctrl.listarMovimientos);
 router.post('/movimientos', ctrl.registrarMovimiento);
 router.get('/ventas', ctrl.listarVentas);
 router.post('/ventas', ctrl.crearVenta);
+router.get('/reporte-economico', ctrl.reporteEconomico);
+router.get('/reporte-economico/exportar', ctrl.exportarReporte);
 router.get('/exportar', ctrl.exportar);
 
 module.exports = router;
