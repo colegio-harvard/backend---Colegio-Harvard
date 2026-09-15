@@ -1,6 +1,6 @@
 const prisma = require('../config/prisma');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
-const { CANALES, ESTADOS_ENVIO, ESTADOS_COMPROMISO, alumnoActivo, normalizarTelefonoPeru, compromisoVigente, crearMensaje, crearEnlace } = require('../utils/cobranzaMensajeria');
+const { CANALES, ESTADOS_ENVIO, ESTADOS_COMPROMISO, alumnoActivo, normalizarTelefonoPeru, compromisoVigente, crearMensajeNivel, crearEnlace } = require('../utils/cobranzaMensajeria');
 const { todayLima } = require('../utils/dateUtils');
 const { normalizarMesesPlantilla, montoTotalVigente } = require('../services/pensiones/calculoConceptos');
 const { conceptoExigible, fechaVencimientoConcepto } = require('../services/cobranzas/reglasVencimiento');
@@ -82,6 +82,9 @@ async function actualizarCompromiso(req, res) {
 
 async function prepararMensajes(req, res) {
   const canal = String(req.body.canal || '').toUpperCase();
+  const nivel = Number(req.body.nivel ?? 1);
+  const vistaPrevia = req.body.vista_previa === true;
+  if (![1, 2, 3, 4].includes(nivel) || (canal === 'SMS' && nivel !== 1)) return res.status(400).json({ error: 'Nivel de comunicación no válido para el canal' });
   const ids = [...new Set((req.body.ids_estado_pension || []).map(Number).filter(Number.isInteger))];
   if (!CANALES.has(canal)) return res.status(400).json({ error: 'Canal no valido' });
   if (!ids.length) return res.status(400).json({ error: 'Seleccione al menos una pension' });
@@ -99,10 +102,14 @@ async function prepararMensajes(req, res) {
       grupo.conceptos.push({ id_estado_pension: estado.id, clave_mes: candidato.clave_mes, concepto: candidato.concepto, saldo: candidato.saldo });
       grupos.set(candidato.id_alumno, grupo);
     }
-    for (const { candidato, conceptos } of grupos.values()) {
-      const mensaje = crearMensaje({ canal, colegio: 'COLEGIO HARVARD', alumno: candidato.alumno, conceptos, telefonoContacto: colegio && (colegio.telefono_whatsapp || colegio.telefono) });
+    const borradores = [...grupos.values()].map(({ candidato, conceptos }) => ({ candidato, conceptos, mensaje: crearMensajeNivel({ canal, colegio: 'COLEGIO HARVARD', alumno: candidato.alumno, conceptos, telefonoContacto: colegio && (colegio.telefono_whatsapp || colegio.telefono) }, nivel) }));
+    if (vistaPrevia) return res.json({ data: { preparados: borradores.map(({ candidato, conceptos, mensaje }) => ({ id_alumno: candidato.id_alumno, alumno: candidato.alumno, apoderado: candidato.apoderado, conceptos, mensaje, nivel, total: conceptos.reduce((s, x) => s + Number(x.saldo), 0) })), omitidos } });
+    if (Array.isArray(req.body.revisados) && (req.body.revisados.length !== borradores.length || borradores.some(x => !req.body.revisados.some(r => r.id_alumno === x.candidato.id_alumno && r.mensaje === x.mensaje)))) return res.status(409).json({ error: 'La deuda o selección cambió. Vuelva a revisar la vista previa antes de preparar.' });
+    for (const { candidato, conceptos, mensaje } of borradores) {
       const envio = await prisma.tbl_cobranza_envios.create({ data: { id_estado_pension: conceptos[0].id_estado_pension, id_padre: candidato.id_padre, canal, telefono: candidato.telefono, mensaje, enlace_apertura: crearEnlace(canal, candidato.telefono, mensaje), creado_por: req.user.id, user_id_registration: req.user.id } });
-      preparados.push({ ...envio, alumno: candidato.alumno, apoderado: candidato.apoderado, conceptos });
+      const total = conceptos.reduce((s, x) => s + Number(x.saldo), 0);
+      preparados.push({ ...envio, alumno: candidato.alumno, apoderado: candidato.apoderado, conceptos, nivel, total });
+      await registrarAuditoria({ userId: req.user.id, accion: 'NIVEL_COBRANZA_PREPARADO', tipoEntidad: 'tbl_cobranza_envios', idEntidad: envio.id, resumen: `Cobranza nivel ${nivel} para ${candidato.alumno}`, meta: { id_alumno: candidato.id_alumno, id_padre: candidato.id_padre, nivel, total, mensaje }, req });
     }
     await registrarAuditoria({ userId: req.user.id, accion: 'PREPARAR_COBRANZA', tipoEntidad: 'tbl_cobranza_envios', resumen: `${preparados.length} mensajes ${canal} preparados`, meta: { ids, omitidos }, req });
     res.status(201).json({ data: { preparados, omitidos } });
