@@ -85,6 +85,7 @@ model tbl_usuarios {
   alertas_operativas_creadas                tbl_alertas_operativas_alumno[]         @relation("alerta_operativa_creador")
   alertas_operativas_resueltas              tbl_alertas_operativas_alumno[]         @relation("alerta_operativa_resolutor")
   alertas_operativas_atendidas              tbl_alertas_operativas_alumno[]         @relation("alerta_operativa_atencion")
+  alertas_operativas_confirmadas            tbl_alertas_operativas_alumno[]         @relation("alerta_operativa_confirmacion")
   alumnos_siagie_actualizados               tbl_alumnos[]                           @relation("alumno_siagie_actualizador")
   inventario_movimientos                    tbl_inventario_movimientos[]
   inventario_ventas                         tbl_inventario_ventas[]
@@ -678,12 +679,15 @@ model tbl_alertas_operativas_alumno {
   ultima_accion          String?       @db.VarChar(30)
   ultima_accion_por      Int?
   ultima_accion_en       DateTime?     @db.Timestamptz(6)
+  accion_confirmada_por  Int?
+  accion_confirmada_en   DateTime?     @db.Timestamptz(6)
   date_time_registration DateTime      @default(now()) @db.Timestamptz(6)
   date_time_modification DateTime?     @db.Timestamptz(6)
   tbl_alumnos            tbl_alumnos   @relation(fields: [id_alumno], references: [id], onDelete: Cascade)
   usuario_creador        tbl_usuarios  @relation("alerta_operativa_creador", fields: [creado_por], references: [id], onDelete: NoAction)
   usuario_resolutor      tbl_usuarios? @relation("alerta_operativa_resolutor", fields: [resuelto_por], references: [id], onDelete: NoAction)
   usuario_atencion       tbl_usuarios? @relation("alerta_operativa_atencion", fields: [ultima_accion_por], references: [id], onDelete: NoAction)
+  usuario_confirmacion   tbl_usuarios? @relation("alerta_operativa_confirmacion", fields: [accion_confirmada_por], references: [id], onDelete: NoAction)
 
   @@index([id_alumno, estado], map: "idx_alerta_operativa_alumno_estado")
 }

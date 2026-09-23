@@ -3,7 +3,7 @@ const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { emitNotificacion } = require('../utils/socketEmitter');
 const { todayLima } = require('../utils/dateUtils');
 
-const selectAlerta = { id: true, id_alumno: true, mensaje: true, prioridad: true, estado: true, ultima_accion: true, ultima_accion_en: true, date_time_registration: true };
+const selectAlerta = { id: true, id_alumno: true, mensaje: true, prioridad: true, estado: true, ultima_accion: true, ultima_accion_en: true, accion_confirmada_por: true, accion_confirmada_en: true, date_time_registration: true };
 
 const listar = async (req, res) => {
   const estado = String(req.query.estado || 'ACTIVA').toUpperCase();
@@ -83,8 +83,8 @@ const registrarAccion = async (req, res) => {
       include: { tbl_alumnos: { select: { nombre_completo: true, codigo_alumno: true } } },
     });
     if (!alerta) return res.status(404).json({ error: 'La alerta ya no está activa' });
-    if (alerta.ultima_accion === accion) return res.status(409).json({ error: 'Esta acción ya fue registrada y está pendiente de confirmación' });
-    const actualizada = await prisma.tbl_alertas_operativas_alumno.update({ where: { id }, data: { ultima_accion: accion, ultima_accion_por: req.user.id, ultima_accion_en: new Date(), date_time_modification: new Date() }, select: selectAlerta });
+    if (alerta.ultima_accion === accion && !alerta.accion_confirmada_en) return res.status(409).json({ error: 'Esta acción ya fue registrada y está pendiente de confirmación' });
+    const actualizada = await prisma.tbl_alertas_operativas_alumno.update({ where: { id }, data: { ultima_accion: accion, ultima_accion_por: req.user.id, ultima_accion_en: new Date(), accion_confirmada_por: null, accion_confirmada_en: null, date_time_modification: new Date() }, select: selectAlerta });
     const destinatarios = await prisma.tbl_usuarios.findMany({
       where: { estado: 'ACTIVO', tbl_roles: { codigo: { in: ['SUPER_ADMIN', 'ADMIN'] } } },
       select: { id: true },
@@ -131,10 +131,11 @@ const confirmarAccion = async (req, res) => {
     });
     if (!alerta) return res.status(404).json({ error: 'La alerta ya no está activa' });
     if (!alerta.ultima_accion) return res.status(400).json({ error: 'Esta alerta no tiene una atención pendiente de confirmar' });
+    if (alerta.accion_confirmada_en) return res.status(409).json({ error: 'La atención ya fue confirmada' });
     const ahora = new Date();
     const actualizada = await prisma.tbl_alertas_operativas_alumno.update({
       where: { id },
-      data: { estado: 'RESUELTA', resuelto_por: req.user.id, resuelta_en: ahora, date_time_modification: ahora },
+      data: { accion_confirmada_por: req.user.id, accion_confirmada_en: ahora, date_time_modification: ahora },
       select: selectAlerta,
     });
     const esDerivacion = alerta.ultima_accion === 'DERIVAR_OFICINA';
@@ -146,7 +147,7 @@ const confirmarAccion = async (req, res) => {
       resumen: `${esDerivacion ? 'Recepción en oficina' : 'Atención administrativa'} confirmada para ${alerta.tbl_alumnos.nombre_completo}`,
       req,
     });
-    return res.json({ data: actualizada, message: esDerivacion ? 'Recepción confirmada y alerta cerrada' : 'Atención confirmada y alerta cerrada' });
+    return res.json({ data: actualizada, message: esDerivacion ? 'Recepción confirmada; la alerta continúa activa' : 'Atención confirmada; la alerta continúa activa' });
   } catch (error) { console.error('Error al confirmar atención de alerta:', error); return res.status(500).json({ error: 'No se pudo confirmar la atención' }); }
 };
 
