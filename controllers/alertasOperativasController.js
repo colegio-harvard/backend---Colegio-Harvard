@@ -1,5 +1,7 @@
 const prisma = require('../config/prisma');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
+const { emitNotificacion } = require('../utils/socketEmitter');
+const { todayLima } = require('../utils/dateUtils');
 
 const selectAlerta = { id: true, id_alumno: true, mensaje: true, prioridad: true, estado: true, ultima_accion: true, ultima_accion_en: true, date_time_registration: true };
 
@@ -76,12 +78,76 @@ const registrarAccion = async (req, res) => {
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'Alerta inválida' });
   if (!['DERIVAR_OFICINA', 'AVISAR_ADMINISTRACION'].includes(accion)) return res.status(400).json({ error: 'Acción inválida' });
   try {
-    const alerta = await prisma.tbl_alertas_operativas_alumno.findFirst({ where: { id, estado: 'ACTIVA' } });
+    const alerta = await prisma.tbl_alertas_operativas_alumno.findFirst({
+      where: { id, estado: 'ACTIVA' },
+      include: { tbl_alumnos: { select: { nombre_completo: true, codigo_alumno: true } } },
+    });
     if (!alerta) return res.status(404).json({ error: 'La alerta ya no está activa' });
+    if (alerta.ultima_accion === accion) return res.status(409).json({ error: 'Esta acción ya fue registrada y está pendiente de confirmación' });
     const actualizada = await prisma.tbl_alertas_operativas_alumno.update({ where: { id }, data: { ultima_accion: accion, ultima_accion_por: req.user.id, ultima_accion_en: new Date(), date_time_modification: new Date() }, select: selectAlerta });
+    const destinatarios = await prisma.tbl_usuarios.findMany({
+      where: { estado: 'ACTIVO', tbl_roles: { codigo: { in: ['SUPER_ADMIN', 'ADMIN'] } } },
+      select: { id: true },
+    });
+    const alumno = alerta.tbl_alumnos;
+    const nombreAlumno = `${alumno.nombre_completo} (${alumno.codigo_alumno})`;
+    const titulo = accion === 'DERIVAR_OFICINA' ? 'Alumno derivado a oficina' : 'Aviso de portería';
+    const cuerpo = accion === 'DERIVAR_OFICINA'
+      ? `${nombreAlumno} fue derivado desde portería para atender la alerta: ${alerta.mensaje}`
+      : `Portería solicita atención para ${nombreAlumno}. El alumno permanece en portería. Alerta: ${alerta.mensaje}`;
+    const notificaciones = await prisma.$transaction(destinatarios.map(({ id: idUsuario }) => prisma.tbl_notificaciones.create({
+      data: {
+        id_usuario: idUsuario,
+        codigo_plantilla: 'ALERTA_OPERATIVA',
+        titulo,
+        cuerpo,
+        fecha: todayLima().date,
+        referencia_id: alerta.id_alumno,
+        user_id_registration: req.user.id,
+      },
+    })));
+    notificaciones.forEach(notificacion => emitNotificacion(notificacion.id_usuario, {
+      id: notificacion.id,
+      codigo_plantilla: notificacion.codigo_plantilla,
+      referencia_id: notificacion.referencia_id,
+      titulo: notificacion.titulo,
+      mensaje: notificacion.cuerpo,
+      leida: notificacion.leida,
+      fecha: notificacion.fecha,
+      date_time_registration: notificacion.date_time_registration,
+    }));
     await registrarAuditoria({ userId: req.user.id, accion, tipoEntidad: 'tbl_alertas_operativas_alumno', idEntidad: id, resumen: accion === 'DERIVAR_OFICINA' ? 'Alumno derivado a oficina' : 'Administración avisada por alerta operativa', req });
-    return res.json({ data: actualizada, message: accion === 'DERIVAR_OFICINA' ? 'Derivación registrada' : 'Aviso registrado' });
+    return res.json({ data: actualizada, message: accion === 'DERIVAR_OFICINA' ? 'Derivación notificada a administración' : 'Administración notificada' });
   } catch (error) { console.error('Error al registrar atención de alerta:', error); return res.status(500).json({ error: 'No se pudo registrar la acción' }); }
 };
 
-module.exports = { listar, obtenerActiva, guardar, resolver, registrarAccion };
+const confirmarAccion = async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Alerta inválida' });
+  try {
+    const alerta = await prisma.tbl_alertas_operativas_alumno.findFirst({
+      where: { id, estado: 'ACTIVA' },
+      include: { tbl_alumnos: { select: { nombre_completo: true } } },
+    });
+    if (!alerta) return res.status(404).json({ error: 'La alerta ya no está activa' });
+    if (!alerta.ultima_accion) return res.status(400).json({ error: 'Esta alerta no tiene una atención pendiente de confirmar' });
+    const ahora = new Date();
+    const actualizada = await prisma.tbl_alertas_operativas_alumno.update({
+      where: { id },
+      data: { estado: 'RESUELTA', resuelto_por: req.user.id, resuelta_en: ahora, date_time_modification: ahora },
+      select: selectAlerta,
+    });
+    const esDerivacion = alerta.ultima_accion === 'DERIVAR_OFICINA';
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: esDerivacion ? 'CONFIRMAR_RECEPCION_ALERTA' : 'CONFIRMAR_ATENCION_ALERTA',
+      tipoEntidad: 'tbl_alertas_operativas_alumno',
+      idEntidad: id,
+      resumen: `${esDerivacion ? 'Recepción en oficina' : 'Atención administrativa'} confirmada para ${alerta.tbl_alumnos.nombre_completo}`,
+      req,
+    });
+    return res.json({ data: actualizada, message: esDerivacion ? 'Recepción confirmada y alerta cerrada' : 'Atención confirmada y alerta cerrada' });
+  } catch (error) { console.error('Error al confirmar atención de alerta:', error); return res.status(500).json({ error: 'No se pudo confirmar la atención' }); }
+};
+
+module.exports = { listar, obtenerActiva, guardar, resolver, registrarAccion, confirmarAccion };

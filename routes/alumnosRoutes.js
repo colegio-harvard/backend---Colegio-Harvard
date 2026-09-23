@@ -22,6 +22,7 @@ router.get('/', verificarToken, ctrl.listar);
 router.get('/siguiente-codigo', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.siguienteCodigo);
 router.get('/exportar-aulas-excel', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.exportarAulasExcel);
 router.get('/alertas-operativas', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), alertasOperativasCtrl.listar);
+router.post('/alertas-operativas/:id/confirmar', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), alertasOperativasCtrl.confirmarAccion);
 router.post('/', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), upload.single('foto'), ctrl.crear);
 router.post('/vincular', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.vincularPadre);
 router.get('/carnet/:id_alumno', verificarToken, ctrl.obtenerCarnet);
