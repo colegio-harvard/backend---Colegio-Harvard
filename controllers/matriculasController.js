@@ -77,7 +77,7 @@ async function bootstrap(req, res) {
           al.monto_matricula,al.monto_materiales,al.monto_pension,
           p.id id_padre,p.nombre_completo apoderado,p.dni dni_apoderado,p.celular,
           g.nombre grado,a.seccion,n.nombre nivel,
-          md.id id_matricula,md.codigo,md.estado estado_matricula,md.creado_en,md.aceptado_en,
+          md.id id_matricula,md.codigo,md.estado estado_matricula,md.modalidad,md.creado_en,md.aceptado_en,
           md.deuda_snapshot,md.costo_matricula_snapshot,md.observacion_revision,md.borrador_preparado_en,
           COALESCE(deuda.total,0)::numeric deuda_actual
         FROM "tbl_alumnos" al
@@ -210,7 +210,7 @@ async function invitar(req, res) {
       INSERT INTO "tbl_matriculas_digitales" ("id_anio_escolar","id_alumno","id_padre","estado","token_hash","otp_hash","otp_vence_en","invitacion_vence_en","datos_snapshot","documentos_snapshot","deuda_snapshot","costo_matricula_snapshot","creado_por")
       VALUES ($1,$2,$3,'ENVIADA',$4,$5,NOW()+INTERVAL '24 hours',NOW()+INTERVAL '7 days',$6::jsonb,$7::jsonb,$8,$9,$10)
       ON CONFLICT ("id_anio_escolar","id_alumno") DO UPDATE SET
-        "id_padre"=EXCLUDED."id_padre","estado"='ENVIADA',"token_hash"=EXCLUDED."token_hash","otp_hash"=EXCLUDED."otp_hash",
+        "id_padre"=EXCLUDED."id_padre","modalidad"='ELECTRONICA',"estado"='ENVIADA',"token_hash"=EXCLUDED."token_hash","otp_hash"=EXCLUDED."otp_hash",
         "otp_vence_en"=EXCLUDED."otp_vence_en","invitacion_vence_en"=EXCLUDED."invitacion_vence_en","otp_intentos"=0,
         "datos_snapshot"=EXCLUDED."datos_snapshot","documentos_snapshot"=EXCLUDED."documentos_snapshot",
         "deuda_snapshot"=EXCLUDED."deuda_snapshot","costo_matricula_snapshot"=EXCLUDED."costo_matricula_snapshot",
@@ -351,7 +351,7 @@ async function detalle(req, res) {
     const rows = await prisma.$queryRawUnsafe(`SELECT md.*,ae.anio,al.id_aula id_aula_actual,a.id_grado id_grado_actual,g.id_nivel id_nivel_actual,al.monto_matricula monto_matricula_actual,al.monto_pension monto_pension_actual,al.monto_materiales monto_materiales_actual FROM "tbl_matriculas_digitales" md JOIN "tbl_anios_escolares" ae ON ae.id=md.id_anio_escolar JOIN "tbl_alumnos" al ON al.id=md.id_alumno JOIN "tbl_aulas" a ON a.id=al.id_aula JOIN "tbl_grados" g ON g.id=a.id_grado WHERE md.id=$1`, Number(req.params.id));
     if (!rows[0]) return res.status(404).json({ error: 'Matrícula no encontrada' });
     const eventos = await prisma.$queryRawUnsafe(`SELECT * FROM "tbl_eventos_matricula" WHERE id_matricula=$1 ORDER BY creado_en`, Number(req.params.id));
-    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), montos_ficha_actual: { matricula: Number(rows[0].monto_matricula_actual || 0), pension: Number(rows[0].monto_pension_actual || 0), materiales: Number(rows[0].monto_materiales_actual || 0) }, datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), borrador_asistido: json(rows[0].borrador_asistido, {}), complemento_administrativo: json(rows[0].complemento_administrativo, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), control_documental: json(rows[0].control_documental, {}), eventos } });
+    res.json({ data: { ...rows[0], deuda_snapshot: Number(rows[0].deuda_snapshot || 0), costo_matricula_snapshot: Number(rows[0].costo_matricula_snapshot || 0), montos_ficha_actual: { matricula: Number(rows[0].monto_matricula_actual || 0), pension: Number(rows[0].monto_pension_actual || 0), materiales: Number(rows[0].monto_materiales_actual || 0) }, datos_snapshot: json(rows[0].datos_snapshot, {}), datos_formulario: json(rows[0].datos_formulario, {}), borrador_asistido: json(rows[0].borrador_asistido, {}), complemento_administrativo: json(rows[0].complemento_administrativo, {}), documentos_snapshot: json(rows[0].documentos_snapshot, []), aceptaciones_json: json(rows[0].aceptaciones_json, {}), control_documental: json(rows[0].control_documental, {}), firma_fisica: json(rows[0].firma_fisica, {}), eventos } });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo cargar el expediente' }); }
 }
 
@@ -446,5 +446,24 @@ async function revisar(req, res) {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo revisar la matrícula' }); }
 }
 
-module.exports = { bootstrap, guardarConfiguracion, preparar, invitar, obtenerPublica, aceptar, solicitarCorreccion, detalle, guardarBorradorAsistido, guardarComplementoAdministrativo, guardarControlDocumental, revisar };
+async function actualizarFlujoFisico(req, res) {
+  try {
+    const matriculaId = Number(req.params.id); const accion = String(req.body.accion || '').toUpperCase();
+    if (!Number.isInteger(matriculaId) || matriculaId <= 0) return res.status(400).json({ error: 'Matrícula inválida' });
+    if (!['GENERAR_FICHA', 'REGISTRAR_FIRMA', 'RECIBIR_DOCUMENTO'].includes(accion)) return res.status(400).json({ error: 'Acción física inválida' });
+    const item = await prisma.$queryRawUnsafe(`SELECT id,codigo,estado FROM "tbl_matriculas_digitales" WHERE id=$1`, matriculaId);
+    if (!item[0]) return res.status(404).json({ error: 'Matrícula no encontrada' });
+    if (['ACEPTADA', 'COMPLETADA'].includes(item[0].estado)) return res.status(409).json({ error: 'La matrícula ya está cerrada' });
+    let rows;
+    if (accion === 'GENERAR_FICHA') { rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET modalidad='FISICA',actualizado_por=$1,actualizado_en=NOW() WHERE id=$2 RETURNING id,codigo,modalidad`, req.user.id, matriculaId); await registrarEvento(matriculaId, 'FICHA_FISICA_GENERADA', { codigo: item[0].codigo }, req, req.user.id); }
+    else if (accion === 'REGISTRAR_FIRMA') { const firmante = String(req.body.firmante || '').trim().slice(0, 200); const dni = String(req.body.dni || '').trim().slice(0, 20); if (!firmante || !dni) return res.status(400).json({ error: 'Registre nombre y documento de quien firma la ficha' }); const firma = { firmante, dni, registrada_en: new Date().toISOString(), registrada_por: req.user.id }; rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET modalidad='FISICA',firma_fisica=$1::jsonb,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 RETURNING id,codigo,modalidad,firma_fisica`, JSON.stringify(firma), req.user.id, matriculaId); await registrarEvento(matriculaId, 'FIRMA_FISICA_REGISTRADA', { firmante, dni }, req, req.user.id); }
+    else { const referencia = String(req.body.referencia || '').trim().slice(0, 500) || null; rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET modalidad='FISICA',documento_fisico_recibido_en=NOW(),documento_fisico_referencia=$1,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 RETURNING id,codigo,modalidad,documento_fisico_recibido_en,documento_fisico_referencia`, referencia, req.user.id, matriculaId); await registrarEvento(matriculaId, 'DOCUMENTO_FISICO_FIRMADO_RECIBIDO', { referencia }, req, req.user.id); }
+    await registrarAuditoria({ userId: req.user.id, accion: `MATRICULA_FISICA_${accion}`, tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matriculaId, resumen: `${item[0].codigo}: ${accion}`, req });
+    res.json({ data: rows[0] });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo actualizar el flujo físico' }); }
+}
+
+module.exports = { bootstrap, guardarConfiguracion, preparar, invitar, obtenerPublica, aceptar, solicitarCorreccion, detalle, guardarBorradorAsistido, guardarComplementoAdministrativo, guardarControlDocumental, actualizarFlujoFisico, revisar };
+
+
 

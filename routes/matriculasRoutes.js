@@ -18,7 +18,9 @@ router.get('/:id', ...soloGestion, ctrl.detalle);
 router.put('/:id/borrador-asistido', ...soloGestion, ctrl.guardarBorradorAsistido);
 router.put('/:id/complemento-administrativo', verificarToken, verificarRol('SUPER_ADMIN'), ctrl.guardarComplementoAdministrativo);
 router.put('/:id/control-documental', ...soloGestion, ctrl.guardarControlDocumental);
+router.put('/:id/fisica', ...soloGestion, ctrl.actualizarFlujoFisico);
 router.put('/:id/revisar', ...soloGestion, ctrl.revisar);
 
 module.exports = router;
+
 
