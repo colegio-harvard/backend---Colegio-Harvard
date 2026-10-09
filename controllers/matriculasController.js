@@ -450,20 +450,27 @@ async function actualizarFlujoFisico(req, res) {
   try {
     const matriculaId = Number(req.params.id); const accion = String(req.body.accion || '').toUpperCase();
     if (!Number.isInteger(matriculaId) || matriculaId <= 0) return res.status(400).json({ error: 'Matrícula inválida' });
-    if (!['GENERAR_FICHA', 'REGISTRAR_FIRMA', 'RECIBIR_DOCUMENTO'].includes(accion)) return res.status(400).json({ error: 'Acción física inválida' });
-    const item = await prisma.$queryRawUnsafe(`SELECT id,codigo,estado FROM "tbl_matriculas_digitales" WHERE id=$1`, matriculaId);
+    if (!['GENERAR_FICHA', 'REGISTRAR_FIRMA', 'RECIBIR_DOCUMENTO', 'COMPLETAR_FISICA'].includes(accion)) return res.status(400).json({ error: 'Acción física inválida' });
+    const item = await prisma.$queryRawUnsafe(`SELECT id,codigo,estado,firma_fisica FROM "tbl_matriculas_digitales" WHERE id=$1`, matriculaId);
     if (!item[0]) return res.status(404).json({ error: 'Matrícula no encontrada' });
-    if (['ACEPTADA', 'COMPLETADA'].includes(item[0].estado)) return res.status(409).json({ error: 'La matrícula ya está cerrada' });
+    if (item[0].estado === 'COMPLETADA' || (item[0].estado === 'ACEPTADA' && accion !== 'COMPLETAR_FISICA')) return res.status(409).json({ error: 'La matrícula ya está cerrada' });
     let rows;
     if (accion === 'GENERAR_FICHA') { rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET modalidad='FISICA',actualizado_por=$1,actualizado_en=NOW() WHERE id=$2 RETURNING id,codigo,modalidad`, req.user.id, matriculaId); await registrarEvento(matriculaId, 'FICHA_FISICA_GENERADA', { codigo: item[0].codigo }, req, req.user.id); }
     else if (accion === 'REGISTRAR_FIRMA') { const firmante = String(req.body.firmante || '').trim().slice(0, 200); const dni = String(req.body.dni || '').trim().slice(0, 20); if (!firmante || !dni) return res.status(400).json({ error: 'Registre nombre y documento de quien firma la ficha' }); const firma = { firmante, dni, registrada_en: new Date().toISOString(), registrada_por: req.user.id }; rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET modalidad='FISICA',firma_fisica=$1::jsonb,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 RETURNING id,codigo,modalidad,firma_fisica`, JSON.stringify(firma), req.user.id, matriculaId); await registrarEvento(matriculaId, 'FIRMA_FISICA_REGISTRADA', { firmante, dni }, req, req.user.id); }
-    else { const referencia = String(req.body.referencia || '').trim().slice(0, 500) || null; rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET modalidad='FISICA',documento_fisico_recibido_en=NOW(),documento_fisico_referencia=$1,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 RETURNING id,codigo,modalidad,documento_fisico_recibido_en,documento_fisico_referencia`, referencia, req.user.id, matriculaId); await registrarEvento(matriculaId, 'DOCUMENTO_FISICO_FIRMADO_RECIBIDO', { referencia }, req, req.user.id); }
+    else if (accion === 'COMPLETAR_FISICA') {
+      const firma = json(item[0].firma_fisica, {});
+      if (!firma.firmante || !firma.dni) return res.status(409).json({ error: 'Registre primero la firma del apoderado' });
+      rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET modalidad='FISICA',estado='COMPLETADA',documento_fisico_recibido_en=NOW(),actualizado_por=$1,actualizado_en=NOW() WHERE id=$2 RETURNING id,codigo,estado,modalidad,documento_fisico_recibido_en`, req.user.id, matriculaId);
+      await registrarEvento(matriculaId, 'DOCUMENTO_FISICO_FIRMADO_RECIBIDO', { al_completar: true }, req, req.user.id);
+      await registrarEvento(matriculaId, 'MATRICULA_FISICA_COMPLETADA', {}, req, req.user.id);
+    }    else { const referencia = String(req.body.referencia || '').trim().slice(0, 500) || null; rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_matriculas_digitales" SET modalidad='FISICA',documento_fisico_recibido_en=NOW(),documento_fisico_referencia=$1,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 RETURNING id,codigo,modalidad,documento_fisico_recibido_en,documento_fisico_referencia`, referencia, req.user.id, matriculaId); await registrarEvento(matriculaId, 'DOCUMENTO_FISICO_FIRMADO_RECIBIDO', { referencia }, req, req.user.id); }
     await registrarAuditoria({ userId: req.user.id, accion: `MATRICULA_FISICA_${accion}`, tipoEntidad: 'tbl_matriculas_digitales', idEntidad: matriculaId, resumen: `${item[0].codigo}: ${accion}`, req });
     res.json({ data: rows[0] });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo actualizar el flujo físico' }); }
 }
 
 module.exports = { bootstrap, guardarConfiguracion, preparar, invitar, obtenerPublica, aceptar, solicitarCorreccion, detalle, guardarBorradorAsistido, guardarComplementoAdministrativo, guardarControlDocumental, actualizarFlujoFisico, revisar };
+
 
 
 
