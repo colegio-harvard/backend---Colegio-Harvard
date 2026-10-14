@@ -12,6 +12,7 @@ router.post('/productos', ctrl.crearProducto);
 router.put('/productos/:id', ctrl.actualizarProducto);
 router.patch('/productos/:id/archivar', ctrl.archivarProducto);
 router.delete('/productos/:id', ctrl.eliminarProducto);
+router.post('/productos/:id/fusionar', ctrl.fusionarProducto);
 router.put('/categorias/:nombre', ctrl.renombrarCategoria);
 router.get('/movimientos', ctrl.listarMovimientos);
 router.post('/movimientos', ctrl.registrarMovimiento);

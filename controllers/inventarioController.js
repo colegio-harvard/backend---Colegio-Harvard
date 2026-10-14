@@ -184,6 +184,37 @@ exports.eliminarProducto = async (req, res) => {
   } catch (error) { console.error(error); res.status(400).json({ error: error.message || 'No se pudo eliminar el producto' }); }
 };
 
+exports.fusionarProducto = async (req, res) => {
+  try {
+    const origenId = Number(req.params.id);
+    const destinoId = Number(req.body.id_destino);
+    if (!origenId || !destinoId || origenId === destinoId) return res.status(400).json({ error: 'Seleccione dos productos distintos para fusionar' });
+    const resultado = await prisma.$transaction(async tx => {
+      const [origen, destino] = await Promise.all([
+        tx.tbl_inventario_productos.findUnique({ where: { id: origenId }, include: { variantes: true } }),
+        tx.tbl_inventario_productos.findUnique({ where: { id: destinoId }, include: { variantes: true } }),
+      ]);
+      if (!origen || !destino || !origen.activo || !destino.activo) throw new Error('Uno de los productos ya no está disponible');
+      if (nombreNormalizado(origen.nombre) !== nombreNormalizado(destino.nombre)) throw new Error('Solo se pueden fusionar productos con el mismo nombre');
+      for (const varianteOrigen of origen.variantes) {
+        const varianteDestino = destino.variantes.find(variante => nombreNormalizado(variante.nombre) === nombreNormalizado(varianteOrigen.nombre));
+        if (!varianteDestino) {
+          await tx.tbl_inventario_variantes.update({ where: { id: varianteOrigen.id }, data: { id_producto: destino.id } });
+          continue;
+        }
+        await tx.tbl_inventario_movimientos.updateMany({ where: { id_variante: varianteOrigen.id }, data: { id_variante: varianteDestino.id } });
+        await tx.tbl_inventario_venta_items.updateMany({ where: { id_variante: varianteOrigen.id }, data: { id_variante: varianteDestino.id } });
+        await tx.tbl_inventario_variantes.update({ where: { id: varianteDestino.id }, data: { stock: varianteDestino.stock + varianteOrigen.stock } });
+        await tx.tbl_inventario_variantes.delete({ where: { id: varianteOrigen.id } });
+      }
+      await tx.tbl_inventario_productos.delete({ where: { id: origen.id } });
+      return { origen: origen.nombre, destino: destino.nombre, variantes: origen.variantes.length };
+    });
+    await registrarAuditoria({ userId: req.user.id, accion: 'FUSIONAR_PRODUCTOS_INVENTARIO', tipoEntidad: 'tbl_inventario_productos', idEntidad: destinoId, resumen: `Producto fusionado: ${resultado.origen} en ${resultado.destino} (${resultado.variantes} variante(s))`, req });
+    res.json({ data: resultado });
+  } catch (error) { console.error(error); res.status(400).json({ error: error.message || 'No se pudo fusionar el producto' }); }
+};
+
 exports.renombrarCategoria = async (req, res) => {
   try {
     const anterior = decodeURIComponent(req.params.nombre || '').trim();
