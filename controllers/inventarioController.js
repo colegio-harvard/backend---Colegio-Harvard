@@ -12,6 +12,8 @@ const numero = (valor, nombre, minimo = 0) => {
   if (!Number.isFinite(value) || value < minimo) throw new Error(`${nombre} inválido`);
   return value;
 };
+const precioVariante = variante => Number(variante.precio_venta ?? variante.producto?.precio_venta ?? 0);
+const costoVariante = variante => Number(variante.costo_compra ?? variante.producto?.costo_compra ?? 0);
 
 const codigoVenta = () => `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
@@ -43,7 +45,7 @@ exports.resumen = async (_req, res) => {
         where: { estado_pago: { in: ['PENDIENTE', 'PARCIAL'] } }, _sum: { saldo: true }, _count: true,
       }),
     ]);
-    const variantes = productos.flatMap(p => p.variantes.map(v => ({ ...v, limite: v.stock_minimo ?? p.stock_minimo, costo: Number(p.costo_compra || 0) })));
+    const variantes = productos.flatMap(p => p.variantes.map(v => ({ ...v, limite: v.stock_minimo ?? p.stock_minimo, costo: costoVariante({ ...v, producto: p }) })));
     res.json({ data: {
       productos: productos.length,
       unidades: variantes.reduce((s, v) => s + v.stock, 0),
@@ -74,11 +76,13 @@ exports.crearProducto = async (req, res) => {
     const { codigo, nombre, categoria, descripcion, precio_venta, costo_compra, stock_minimo = 3, foto_url, variantes = [] } = req.body;
     if (!nombre?.trim() || !categoria?.trim()) return res.status(400).json({ error: 'Nombre y categoría son obligatorios' });
     if (!Array.isArray(variantes) || !variantes.length) return res.status(400).json({ error: 'Agregue al menos una talla o variante' });
+    const precioBase = numero(variantes[0]?.precio_venta ?? precio_venta, 'Precio de venta');
+    const costoBase = variantes[0]?.costo_compra === '' || variantes[0]?.costo_compra == null ? (costo_compra === '' || costo_compra == null ? null : numero(costo_compra, 'Costo de compra')) : numero(variantes[0].costo_compra, 'Costo de compra');
     const producto = await prisma.$transaction(async tx => {
       const codigoProducto = codigo?.trim().toUpperCase() || await codigoDisponible(tx, 'tbl_inventario_productos', 'codigo', `${partesCodigo(categoria)}-${partesCodigo(nombre)}`, 50);
       const creado = await tx.tbl_inventario_productos.create({ data: {
         codigo: codigoProducto, nombre: nombre.trim(), categoria: categoria.trim(), descripcion: descripcion?.trim() || null,
-        precio_venta: numero(precio_venta, 'Precio de venta'), costo_compra: costo_compra === '' || costo_compra == null ? null : numero(costo_compra, 'Costo de compra'),
+        precio_venta: precioBase, costo_compra: costoBase,
         stock_minimo: Math.trunc(numero(stock_minimo, 'Stock mínimo')), foto_url: foto_url?.trim() || null, user_id_registration: req.user.id,
       } });
       for (const item of variantes) {
@@ -88,6 +92,8 @@ exports.crearProducto = async (req, res) => {
         const variante = await tx.tbl_inventario_variantes.create({ data: {
           id_producto: creado.id, nombre: nombreVariante, sku, stock,
           stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')),
+          precio_venta: numero(item.precio_venta ?? precioBase, 'Precio de venta'),
+          costo_compra: item.costo_compra === '' || item.costo_compra == null ? costoBase : numero(item.costo_compra, 'Costo de compra'),
         } });
         if (stock > 0) await tx.tbl_inventario_movimientos.create({ data: { id_variante: variante.id, tipo: 'INGRESO', cantidad: stock, stock_anterior: 0, stock_nuevo: stock, observacion: 'Stock inicial', registrado_por: req.user.id } });
       }
@@ -104,20 +110,25 @@ exports.crearProducto = async (req, res) => {
 exports.actualizarProducto = async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { codigo, nombre, categoria, descripcion, precio_venta, costo_compra, stock_minimo, foto_url, activo, variantes = [] } = req.body;
+    const { codigo, nombre, categoria, descripcion, precio_venta, costo_compra, stock_minimo = 3, foto_url, activo, variantes = [] } = req.body;
+    if (!Array.isArray(variantes) || !variantes.length) return res.status(400).json({ error: 'Agregue al menos una talla o variante' });
+    const precioBase = numero(variantes[0]?.precio_venta ?? precio_venta, 'Precio de venta');
+    const costoBase = variantes[0]?.costo_compra === '' || variantes[0]?.costo_compra == null ? (costo_compra === '' || costo_compra == null ? null : numero(costo_compra, 'Costo de compra')) : numero(variantes[0].costo_compra, 'Costo de compra');
     const producto = await prisma.$transaction(async tx => {
       await tx.tbl_inventario_productos.update({ where: { id }, data: {
         codigo: codigo?.trim().toUpperCase(), nombre: nombre?.trim(), categoria: categoria?.trim(), descripcion: descripcion?.trim() || null,
-        precio_venta: numero(precio_venta, 'Precio de venta'), costo_compra: costo_compra === '' || costo_compra == null ? null : numero(costo_compra, 'Costo de compra'),
+        precio_venta: precioBase, costo_compra: costoBase,
         stock_minimo: Math.trunc(numero(stock_minimo, 'Stock mínimo')), foto_url: foto_url?.trim() || null, activo: activo !== false,
         user_id_modification: req.user.id, date_time_modification: new Date(),
       } });
       for (const item of variantes) {
-        if (item.id) await tx.tbl_inventario_variantes.update({ where: { id: Number(item.id) }, data: { nombre: item.nombre.trim(), sku: item.sku.trim().toUpperCase(), stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')), activo: item.activo !== false } });
+        if (item.id) await tx.tbl_inventario_variantes.update({ where: { id: Number(item.id) }, data: { nombre: item.nombre.trim(), sku: item.sku.trim().toUpperCase(), stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')), precio_venta: numero(item.precio_venta ?? precioBase, 'Precio de venta'), costo_compra: item.costo_compra === '' || item.costo_compra == null ? costoBase : numero(item.costo_compra, 'Costo de compra'), activo: item.activo !== false } });
         else {
           const productoActual = await tx.tbl_inventario_productos.findUnique({ where: { id }, select: { codigo: true } });
           const sku = item.sku?.trim().toUpperCase() || await codigoDisponible(tx, 'tbl_inventario_variantes', 'sku', `${productoActual.codigo}-${partesCodigo(item.nombre) || 'UNICA'}`, 80);
-          await tx.tbl_inventario_variantes.create({ data: { id_producto: id, nombre: item.nombre.trim(), sku, stock: 0, stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')) } });
+          const stock = Math.trunc(numero(item.stock || 0, 'Stock actual'));
+          const variante = await tx.tbl_inventario_variantes.create({ data: { id_producto: id, nombre: item.nombre.trim(), sku, stock, stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')), precio_venta: numero(item.precio_venta ?? precioBase, 'Precio de venta'), costo_compra: item.costo_compra === '' || item.costo_compra == null ? costoBase : numero(item.costo_compra, 'Costo de compra') } });
+          if (stock > 0) await tx.tbl_inventario_movimientos.create({ data: { id_variante: variante.id, tipo: 'INGRESO', cantidad: stock, stock_anterior: 0, stock_nuevo: stock, observacion: 'Stock inicial de variante', registrado_por: req.user.id } });
         }
       }
       return tx.tbl_inventario_productos.findUnique({ where: { id }, include: productoInclude });
@@ -175,7 +186,7 @@ exports.crearVenta = async (req, res) => {
         const variante = mapa.get(Number(item.id_variante));
         const cantidad = Math.trunc(numero(item.cantidad, 'Cantidad', 1));
         if (variante.stock < cantidad) throw new Error(`Stock insuficiente para ${variante.producto.nombre} · ${variante.nombre}`);
-        const precio = tipo === 'GRATUITA' ? 0 : Number(variante.producto.precio_venta);
+        const precio = tipo === 'GRATUITA' ? 0 : precioVariante(variante);
         return { variante, cantidad, precio, subtotal: precio * cantidad };
       });
       const total = detalles.reduce((s, x) => s + x.subtotal, 0);
@@ -234,7 +245,7 @@ const construirReporte = async (query = {}) => {
     const totalFiltrado = items.reduce((s, item) => s + Number(item.subtotal), 0);
     const proporcion = Number(venta.total) > 0 ? totalFiltrado / Number(venta.total) : 0;
     const pagado = Number(venta.monto_pagado) * proporcion;
-    const costo = items.reduce((s, item) => s + Number(item.variante.producto.costo_compra || 0) * item.cantidad, 0);
+    const costo = items.reduce((s, item) => s + costoVariante(item.variante) * item.cantidad, 0);
     return { ...venta, items, total_reporte: totalFiltrado, pagado_reporte: pagado, saldo_reporte: Math.max(0, totalFiltrado - pagado), costo_reporte: costo, utilidad_reporte: totalFiltrado - costo };
   }).filter(Boolean);
   const sumar = campo => operaciones.reduce((s, venta) => s + Number(venta[campo] || 0), 0);
@@ -269,7 +280,7 @@ exports.exportar = async (_req, res) => {
       prisma.tbl_inventario_ventas.findMany({ include: { alumno: { select: { codigo_alumno: true, nombre_completo: true } } }, orderBy: { fecha: 'desc' } }),
     ]);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(productos.flatMap(p => p.variantes.map(v => ({ Código: p.codigo, Producto: p.nombre, Categoría: p.categoria, Variante: v.nombre, SKU: v.sku, Stock: v.stock, 'Stock mínimo': v.stock_minimo ?? p.stock_minimo, 'Precio venta': Number(p.precio_venta), 'Costo compra': Number(p.costo_compra || 0), Estado: !v.activo ? 'INACTIVO' : v.stock <= 0 ? 'AGOTADO' : v.stock <= (v.stock_minimo ?? p.stock_minimo) ? 'STOCK BAJO' : 'DISPONIBLE' })))), 'Inventario');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(productos.flatMap(p => p.variantes.map(v => ({ Código: p.codigo, Producto: p.nombre, Categoría: p.categoria, Variante: v.nombre, SKU: v.sku, Stock: v.stock, 'Stock mínimo': v.stock_minimo ?? p.stock_minimo, 'Precio venta': precioVariante({ ...v, producto: p }), 'Costo compra': costoVariante({ ...v, producto: p }), Estado: !v.activo ? 'INACTIVO' : v.stock <= 0 ? 'AGOTADO' : v.stock <= (v.stock_minimo ?? p.stock_minimo) ? 'STOCK BAJO' : 'DISPONIBLE' })))), 'Inventario');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(movimientos.map(m => ({ Fecha: m.fecha, Tipo: m.tipo, Producto: m.variante.producto.nombre, Variante: m.variante.nombre, Cantidad: m.cantidad, 'Stock anterior': m.stock_anterior, 'Stock nuevo': m.stock_nuevo, Usuario: m.usuario.nombres, Observación: m.observacion || '' }))), 'Movimientos');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ventas.map(v => ({ Fecha: v.fecha, Código: v.codigo, Alumno: v.alumno?.nombre_completo || '', 'Código alumno': v.alumno?.codigo_alumno || '', Tipo: v.tipo, 'Estado pago': v.estado_pago, Total: Number(v.total), Pagado: Number(v.monto_pagado), Saldo: Number(v.saldo), 'Medio de pago': v.medio_pago || '' }))), 'Ventas');
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });

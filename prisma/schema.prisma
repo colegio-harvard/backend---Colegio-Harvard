@@ -837,6 +837,8 @@ model tbl_inventario_variantes {
   sku                    String                       @unique @db.VarChar(80)
   stock                  Int                          @default(0)
   stock_minimo           Int?
+  precio_venta           Decimal?                     @db.Decimal(10, 2)
+  costo_compra           Decimal?                     @db.Decimal(10, 2)
   activo                 Boolean                      @default(true)
   date_time_registration DateTime                     @default(now()) @db.Timestamptz(6)
   producto               tbl_inventario_productos     @relation(fields: [id_producto], references: [id], onDelete: Cascade)
