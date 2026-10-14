@@ -21,6 +21,14 @@ const partesCodigo = value => String(value || '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(/\s+/)
   .filter(Boolean).slice(0, 2).map(parte => parte.slice(0, 3)).join('-');
+const nombreNormalizado = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
+const productoConMismoNombre = async (tx, nombre, excluirId = null) => {
+  const candidatos = await tx.tbl_inventario_productos.findMany({
+    where: { activo: true, ...(excluirId ? { id: { not: excluirId } } : {}) },
+    select: { id: true, nombre: true },
+  });
+  return candidatos.find(producto => nombreNormalizado(producto.nombre) === nombreNormalizado(nombre));
+};
 
 const codigoDisponible = async (tx, modelo, campo, base, maximo) => {
   const limpio = String(base || 'ITEM').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, maximo);
@@ -79,6 +87,8 @@ exports.crearProducto = async (req, res) => {
     const precioBase = numero(variantes[0]?.precio_venta ?? precio_venta, 'Precio de venta');
     const costoBase = variantes[0]?.costo_compra === '' || variantes[0]?.costo_compra == null ? (costo_compra === '' || costo_compra == null ? null : numero(costo_compra, 'Costo de compra')) : numero(variantes[0].costo_compra, 'Costo de compra');
     const producto = await prisma.$transaction(async tx => {
+      const duplicado = await productoConMismoNombre(tx, nombre);
+      if (duplicado) throw new Error(`El producto “${duplicado.nombre}” ya existe. Selecciónelo para agregar o editar sus variantes.`);
       const codigoProducto = codigo?.trim().toUpperCase() || await codigoDisponible(tx, 'tbl_inventario_productos', 'codigo', `${partesCodigo(categoria)}-${partesCodigo(nombre)}`, 50);
       const creado = await tx.tbl_inventario_productos.create({ data: {
         codigo: codigoProducto, nombre: nombre.trim(), categoria: categoria.trim(), descripcion: descripcion?.trim() || null,
@@ -115,6 +125,12 @@ exports.actualizarProducto = async (req, res) => {
     const precioBase = numero(variantes[0]?.precio_venta ?? precio_venta, 'Precio de venta');
     const costoBase = variantes[0]?.costo_compra === '' || variantes[0]?.costo_compra == null ? (costo_compra === '' || costo_compra == null ? null : numero(costo_compra, 'Costo de compra')) : numero(variantes[0].costo_compra, 'Costo de compra');
     const producto = await prisma.$transaction(async tx => {
+      const actual = await tx.tbl_inventario_productos.findUnique({ where: { id }, select: { nombre: true } });
+      if (!actual) throw new Error('Producto no encontrado');
+      if (nombreNormalizado(actual.nombre) !== nombreNormalizado(nombre)) {
+        const duplicado = await productoConMismoNombre(tx, nombre, id);
+        if (duplicado) throw new Error(`El producto “${duplicado.nombre}” ya existe. Selecciónelo para agregar o editar sus variantes.`);
+      }
       await tx.tbl_inventario_productos.update({ where: { id }, data: {
         codigo: codigo?.trim().toUpperCase(), nombre: nombre?.trim(), categoria: categoria?.trim(), descripcion: descripcion?.trim() || null,
         precio_venta: precioBase, costo_compra: costoBase,
