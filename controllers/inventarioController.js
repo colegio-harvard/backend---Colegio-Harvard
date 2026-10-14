@@ -153,6 +153,53 @@ exports.actualizarProducto = async (req, res) => {
   } catch (error) { console.error(error); res.status(error.code === 'P2002' ? 409 : 400).json({ error: error.code === 'P2002' ? 'El código o SKU ya existe' : error.message || 'No se pudo actualizar el producto' }); }
 };
 
+exports.archivarProducto = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const producto = await prisma.$transaction(async tx => {
+      const actual = await tx.tbl_inventario_productos.findUnique({ where: { id }, select: { id: true, nombre: true } });
+      if (!actual) throw new Error('Producto no encontrado');
+      await tx.tbl_inventario_productos.update({ where: { id }, data: { activo: false, user_id_modification: req.user.id, date_time_modification: new Date() } });
+      await tx.tbl_inventario_variantes.updateMany({ where: { id_producto: id }, data: { activo: false } });
+      return actual;
+    });
+    await registrarAuditoria({ userId: req.user.id, accion: 'ARCHIVAR_PRODUCTO_INVENTARIO', tipoEntidad: 'tbl_inventario_productos', idEntidad: id, resumen: `Producto archivado: ${producto.nombre}`, req });
+    res.json({ data: producto });
+  } catch (error) { console.error(error); res.status(400).json({ error: error.message || 'No se pudo archivar el producto' }); }
+};
+
+exports.eliminarProducto = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const producto = await prisma.tbl_inventario_productos.findUnique({ where: { id }, select: { id: true, nombre: true } });
+    if (!producto) return res.status(404).json({ error: 'Producto no encontrado' });
+    const [movimientos, ventas] = await Promise.all([
+      prisma.tbl_inventario_movimientos.count({ where: { variante: { id_producto: id } } }),
+      prisma.tbl_inventario_venta_items.count({ where: { variante: { id_producto: id } } }),
+    ]);
+    if (movimientos || ventas) return res.status(409).json({ error: 'Este producto tiene historial. Use Archivar para conservarlo sin mostrarlo en el inventario.' });
+    await prisma.tbl_inventario_productos.delete({ where: { id } });
+    await registrarAuditoria({ userId: req.user.id, accion: 'ELIMINAR_PRODUCTO_INVENTARIO', tipoEntidad: 'tbl_inventario_productos', idEntidad: id, resumen: `Producto eliminado: ${producto.nombre}`, req });
+    res.json({ data: producto });
+  } catch (error) { console.error(error); res.status(400).json({ error: error.message || 'No se pudo eliminar el producto' }); }
+};
+
+exports.renombrarCategoria = async (req, res) => {
+  try {
+    const anterior = decodeURIComponent(req.params.nombre || '').trim();
+    const nueva = String(req.body.nombre || '').trim();
+    if (!anterior || !nueva) return res.status(400).json({ error: 'Indique el nuevo nombre de la categoría' });
+    const productos = await prisma.tbl_inventario_productos.findMany({ where: { activo: true }, select: { id: true, categoria: true } });
+    const afectados = productos.filter(producto => nombreNormalizado(producto.categoria) === nombreNormalizado(anterior));
+    if (!afectados.length) return res.status(404).json({ error: 'Categoría no encontrada' });
+    const existeOtra = productos.some(producto => nombreNormalizado(producto.categoria) === nombreNormalizado(nueva) && nombreNormalizado(producto.categoria) !== nombreNormalizado(anterior));
+    if (existeOtra) return res.status(409).json({ error: 'Ya existe una categoría con ese nombre' });
+    await prisma.tbl_inventario_productos.updateMany({ where: { id: { in: afectados.map(producto => producto.id) } }, data: { categoria: nueva, user_id_modification: req.user.id, date_time_modification: new Date() } });
+    await registrarAuditoria({ userId: req.user.id, accion: 'RENOMBRAR_CATEGORIA_INVENTARIO', tipoEntidad: 'categoria_inventario', resumen: `Categoría renombrada: ${anterior} → ${nueva}`, req });
+    res.json({ data: { anterior, nombre: nueva, productos_actualizados: afectados.length } });
+  } catch (error) { console.error(error); res.status(400).json({ error: error.message || 'No se pudo renombrar la categoría' }); }
+};
+
 exports.registrarMovimiento = async (req, res) => {
   try {
     const { id_variante, tipo, cantidad, stock_nuevo, observacion } = req.body;
