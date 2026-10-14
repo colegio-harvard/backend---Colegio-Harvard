@@ -70,9 +70,10 @@ exports.resumen = async (_req, res) => {
 
 exports.listarProductos = async (req, res) => {
   try {
+    const incluirInactivos = req.query.incluir_inactivos === 'true';
     const productos = await prisma.tbl_inventario_productos.findMany({
-      where: req.query.incluir_inactivos === 'true' ? {} : { activo: true },
-      include: productoInclude,
+      where: incluirInactivos ? {} : { activo: true },
+      include: { variantes: { where: incluirInactivos ? {} : { activo: true }, orderBy: { nombre: 'asc' } } },
       orderBy: [{ categoria: 'asc' }, { nombre: 'asc' }],
     });
     res.json({ data: productos });
@@ -166,6 +167,24 @@ exports.archivarProducto = async (req, res) => {
     await registrarAuditoria({ userId: req.user.id, accion: 'ARCHIVAR_PRODUCTO_INVENTARIO', tipoEntidad: 'tbl_inventario_productos', idEntidad: id, resumen: `Producto archivado: ${producto.nombre}`, req });
     res.json({ data: producto });
   } catch (error) { console.error(error); res.status(400).json({ error: error.message || 'No se pudo archivar el producto' }); }
+};
+
+exports.restaurarProducto = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const producto = await prisma.$transaction(async tx => {
+      const actual = await tx.tbl_inventario_productos.findUnique({ where: { id }, select: { id: true, nombre: true, activo: true } });
+      if (!actual) throw new Error('Producto no encontrado');
+      if (actual.activo) throw new Error('El producto ya está activo');
+      const duplicado = await productoConMismoNombre(tx, actual.nombre, id);
+      if (duplicado) throw new Error(`Ya existe el producto activo “${duplicado.nombre}”. Fusiónelo o mantenga este producto archivado para evitar duplicados.`);
+      await tx.tbl_inventario_productos.update({ where: { id }, data: { activo: true, user_id_modification: req.user.id, date_time_modification: new Date() } });
+      await tx.tbl_inventario_variantes.updateMany({ where: { id_producto: id }, data: { activo: true } });
+      return actual;
+    });
+    await registrarAuditoria({ userId: req.user.id, accion: 'RESTAURAR_PRODUCTO_INVENTARIO', tipoEntidad: 'tbl_inventario_productos', idEntidad: id, resumen: `Producto restaurado: ${producto.nombre}`, req });
+    res.json({ data: producto });
+  } catch (error) { console.error(error); res.status(400).json({ error: error.message || 'No se pudo restaurar el producto' }); }
 };
 
 exports.eliminarProducto = async (req, res) => {

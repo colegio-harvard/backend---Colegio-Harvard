@@ -11,6 +11,7 @@ router.get('/productos', ctrl.listarProductos);
 router.post('/productos', ctrl.crearProducto);
 router.put('/productos/:id', ctrl.actualizarProducto);
 router.patch('/productos/:id/archivar', ctrl.archivarProducto);
+router.patch('/productos/:id/restaurar', ctrl.restaurarProducto);
 router.delete('/productos/:id', ctrl.eliminarProducto);
 router.post('/productos/:id/fusionar', ctrl.fusionarProducto);
 router.put('/categorias/:nombre', ctrl.renombrarCategoria);
