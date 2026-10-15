@@ -7,6 +7,7 @@ const router = express.Router();
 const administradores = [verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN')];
 
 router.get('/padre/mis-horarios', verificarToken, verificarRol('PADRE'), ctrl.misHorariosPadre);
+router.get('/docente/mi-horario', verificarToken, verificarRol('DOCENTE'), ctrl.miHorarioDocente);
 
 router.get('/bloques', ...administradores, ctrl.listarBloques);
 router.post('/bloques', ...administradores, ctrl.crearBloque);

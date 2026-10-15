@@ -431,3 +431,11 @@ exports.misHorariosPadre = async (req, res) => {
     res.json({ data });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron obtener los horarios de sus hijos' }); }
 };
+
+exports.miHorarioDocente = async (req, res) => {
+  try {
+    const clases = await prisma.$queryRawUnsafe(`SELECT d.dia_semana,d.observacion,b.nombre bloque,b.hora_inicio,b.hora_fin,b.tipo,c.nombre curso,n.nombre nivel,g.nombre grado,a.seccion,ae.anio,u.nombres docente
+      FROM "tbl_horario_detalles" d JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_aulas" a ON a.id=h.id_aula JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_niveles" n ON n.id=g.id_nivel JOIN "tbl_anios_escolares" ae ON ae.id=h.id_anio_escolar JOIN "tbl_usuarios" u ON u.id=aa.id_docente WHERE aa.id_docente=$1 AND h.estado='PUBLICADO' ORDER BY ae.anio DESC,b.hora_inicio,d.dia_semana`, req.user.id);
+    res.json({ data: { docente: clases[0]?.docente || req.user.nombres || '', anio: clases[0]?.anio || null, clases } });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo obtener el horario docente' }); }
+};
