@@ -124,6 +124,7 @@ const login = async (req, res) => {
         rol: usuario.rol,
         rol_codigo: usuario.rol_codigo,
         permisos: usuario.permisos,
+        capacidades: usuario.capacidades || [],
       },
     });
   } catch (error) {

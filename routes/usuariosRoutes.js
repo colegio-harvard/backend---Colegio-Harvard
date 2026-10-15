@@ -10,6 +10,8 @@ router.get('/:id', verificarToken, verificarRol('SUPER_ADMIN'), ctrl.obtenerPorI
 router.post('/', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.crear);
 router.put('/:id', verificarToken, verificarRol('SUPER_ADMIN'), ctrl.actualizar);
 router.put('/:id/reset-password', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.resetearContrasena);
+router.put('/:id/capacidades/academico-docente', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.asignarCapacidadAcademicoDocente);
+router.delete('/:id/capacidades/academico-docente', verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'), ctrl.retirarCapacidadAcademicoDocente);
 router.delete('/:id', verificarToken, verificarRol('SUPER_ADMIN'), ctrl.eliminar);
 
 module.exports = router;

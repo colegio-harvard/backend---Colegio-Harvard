@@ -26,11 +26,19 @@ const findUserByUsername = async (username) => {
           )
         ) FILTER (WHERE p.id IS NOT NULL),
         '[]'
-      ) AS permisos
+      ) AS permisos,
+      COALESCE(
+        json_agg(
+          DISTINCT up.codigo
+        ) FILTER (WHERE up.id IS NOT NULL),
+        '[]'
+      ) AS capacidades
     FROM tbl_usuarios u
     JOIN tbl_roles r ON u.id_rol = r.id
     LEFT JOIN tbl_roles_permisos rp ON r.id = rp.id_rol
     LEFT JOIN tbl_permisos p ON rp.id_permiso = p.id
+    LEFT JOIN tbl_usuarios_permisos upu ON upu.id_usuario = u.id
+    LEFT JOIN tbl_permisos up ON up.id = upu.id_permiso
     WHERE u.username = ${username}
     GROUP BY u.id, u.nombres, u.username, u.contrasena, u.id_rol, u.estado,
              u.intentos_fallidos, u.bloqueado_hasta, r.nombre, r.codigo

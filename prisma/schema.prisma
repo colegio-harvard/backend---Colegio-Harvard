@@ -32,6 +32,7 @@ model tbl_permisos {
   user_id_modification   Int?
   date_time_modification DateTime?            @db.Timestamptz(6)
   tbl_roles_permisos     tbl_roles_permisos[]
+  tbl_usuarios_permisos  tbl_usuarios_permisos[]
 }
 
 model tbl_roles_permisos {
@@ -90,6 +91,20 @@ model tbl_usuarios {
   inventario_movimientos                    tbl_inventario_movimientos[]
   inventario_ventas                         tbl_inventario_ventas[]
   tbl_roles                                 tbl_roles                               @relation(fields: [id_rol], references: [id], onDelete: NoAction)
+  tbl_usuarios_permisos                     tbl_usuarios_permisos[]
+}
+
+model tbl_usuarios_permisos {
+  id            Int          @id @default(autoincrement())
+  id_usuario    Int
+  id_permiso    Int
+  asignado_por  Int?
+  asignado_en   DateTime     @default(now()) @db.Timestamptz(6)
+  permiso       tbl_permisos @relation(fields: [id_permiso], references: [id], onDelete: Cascade)
+  usuario       tbl_usuarios @relation(fields: [id_usuario], references: [id], onDelete: Cascade)
+
+  @@unique([id_usuario, id_permiso], map: "uq_usuario_permiso")
+  @@index([id_usuario], map: "idx_usuarios_permisos_usuario")
 }
 
 model tbl_colegio {

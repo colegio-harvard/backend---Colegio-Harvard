@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
 const { registrarAuditoria } = require('../middleware/auditMiddleware');
 const { validarContrasena } = require('../utils/validaciones');
+const { CAPACIDAD_ACADEMICO_DOCENTE } = require('../services/capacidadesService');
 
 const listar = async (req, res) => {
   try {
@@ -146,6 +147,69 @@ const eliminar = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al eliminar usuario' }); }
 };
 
+const resolverUsuarioYCapacidadDocente = async (id) => {
+  const usuario = await prisma.tbl_usuarios.findUnique({
+    where: { id },
+    select: { id: true, estado: true },
+  });
+  if (!usuario || usuario.estado === 'ELIMINADO') return { error: 'Usuario no encontrado' };
+  const permiso = await prisma.tbl_permisos.findUnique({ where: { codigo: CAPACIDAD_ACADEMICO_DOCENTE } });
+  if (!permiso) return { error: 'La capacidad académica docente no está configurada' };
+  return { usuario, permiso };
+};
+
+const asignarCapacidadAcademicoDocente = async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Usuario inválido' });
+  try {
+    const resultado = await resolverUsuarioYCapacidadDocente(id);
+    if (resultado.error) return res.status(404).json({ error: resultado.error });
+    const capacidad = await prisma.tbl_usuarios_permisos.upsert({
+      where: { id_usuario_id_permiso: { id_usuario: id, id_permiso: resultado.permiso.id } },
+      create: { id_usuario: id, id_permiso: resultado.permiso.id, asignado_por: req.user.id },
+      update: {},
+    });
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: 'ASIGNAR_CAPACIDAD_ACADEMICO_DOCENTE',
+      tipoEntidad: 'tbl_usuarios_permisos',
+      idEntidad: capacidad.id,
+      resumen: `Capacidad académica docente asignada al usuario ${id}`,
+      meta: { usuario_afectado: id, capacidad: CAPACIDAD_ACADEMICO_DOCENTE },
+      req,
+    });
+    res.json({ data: { id_usuario: id, capacidad: CAPACIDAD_ACADEMICO_DOCENTE } });
+  } catch (error) {
+    console.error('Error asignando capacidad académica docente:', error);
+    res.status(500).json({ error: 'No se pudo asignar la capacidad académica docente' });
+  }
+};
+
+const retirarCapacidadAcademicoDocente = async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'Usuario inválido' });
+  try {
+    const resultado = await resolverUsuarioYCapacidadDocente(id);
+    if (resultado.error) return res.status(404).json({ error: resultado.error });
+    const eliminadas = await prisma.tbl_usuarios_permisos.deleteMany({
+      where: { id_usuario: id, id_permiso: resultado.permiso.id },
+    });
+    await registrarAuditoria({
+      userId: req.user.id,
+      accion: 'RETIRAR_CAPACIDAD_ACADEMICO_DOCENTE',
+      tipoEntidad: 'tbl_usuarios_permisos',
+      idEntidad: id,
+      resumen: `Capacidad académica docente retirada al usuario ${id}`,
+      meta: { usuario_afectado: id, capacidad: CAPACIDAD_ACADEMICO_DOCENTE, eliminadas: eliminadas.count },
+      req,
+    });
+    res.json({ data: { id_usuario: id, capacidad: CAPACIDAD_ACADEMICO_DOCENTE, retirada: Boolean(eliminadas.count) } });
+  } catch (error) {
+    console.error('Error retirando capacidad académica docente:', error);
+    res.status(500).json({ error: 'No se pudo retirar la capacidad académica docente' });
+  }
+};
+
 const listarRoles = async (_req, res) => {
   try {
     const roles = await prisma.tbl_roles.findMany({
@@ -159,4 +223,4 @@ const listarRoles = async (_req, res) => {
   }
 };
 
-module.exports = { listar, obtenerPorId, crear, actualizar, resetearContrasena, eliminar, listarRoles };
+module.exports = { listar, obtenerPorId, crear, actualizar, resetearContrasena, eliminar, listarRoles, asignarCapacidadAcademicoDocente, retirarCapacidadAcademicoDocente };

@@ -20,8 +20,8 @@ describe('Fase 6: disponibilidad docente', () => {
     expect(rutas).toContain("verificarRol('SUPER_ADMIN', 'ADMIN')");
   });
 
-  test('solo ofrece usuarios docentes activos para configurar disponibilidad', () => {
-    expect(controlador).toContain("u.estado='ACTIVO' AND r.codigo='DOCENTE'");
+  test('ofrece personal docente funcional activo para configurar disponibilidad', () => {
+    expect(controlador).toContain("u.estado='ACTIVO' AND (r.codigo='DOCENTE' OR p.codigo='ACADEMICO_DOCENTE')");
   });
 
   test('bloquea como conflicto crítico la asignación en una restricción docente', () => {

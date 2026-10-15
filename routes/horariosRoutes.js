@@ -1,13 +1,15 @@
 const express = require('express');
 const verificarToken = require('../middleware/authMiddleware');
 const verificarRol = require('../middleware/rbacMiddleware');
+const verificarRolOCapacidad = require('../middleware/rbacCapacidadesMiddleware');
+const { CAPACIDAD_ACADEMICO_DOCENTE } = require('../services/capacidadesService');
 const ctrl = require('../controllers/horariosController');
 
 const router = express.Router();
 const administradores = [verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN')];
 
 router.get('/padre/mis-horarios', verificarToken, verificarRol('PADRE'), ctrl.misHorariosPadre);
-router.get('/docente/mi-horario', verificarToken, verificarRol('DOCENTE'), ctrl.miHorarioDocente);
+router.get('/docente/mi-horario', verificarToken, verificarRolOCapacidad(['DOCENTE'], [CAPACIDAD_ACADEMICO_DOCENTE]), ctrl.miHorarioDocente);
 router.get('/espacios', ...administradores, ctrl.listarEspacios);
 router.post('/espacios', ...administradores, ctrl.crearEspacio);
 router.put('/espacios/:id', ...administradores, ctrl.actualizarEspacio);
