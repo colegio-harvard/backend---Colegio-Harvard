@@ -38,6 +38,7 @@ const libretasRoutes = require('./routes/libretasRoutes');
 const cobranzasRoutes = require('./routes/cobranzasRoutes');
 const matriculasRoutes = require('./routes/matriculasRoutes');
 const inventarioRoutes = require('./routes/inventarioRoutes');
+const horariosRoutes = require('./routes/horariosRoutes');
 
 // --- Controller para cron ---
 const { ejecutarAlertasNoLlego } = require('./controllers/alertasController');
@@ -95,6 +96,7 @@ app.use('/api/libretas', libretasRoutes);
 app.use('/api/cobranzas', cobranzasRoutes);
 app.use('/api/matriculas', matriculasRoutes);
 app.use('/api/inventario', inventarioRoutes);
+app.use('/api/horarios', horariosRoutes);
 
 // --- Ruta de prueba ---
 app.get('/api/ping', async (req, res) => {
