@@ -118,6 +118,25 @@ exports.desactivarBloque = async (req, res) => {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo desactivar el bloque horario' }); }
 };
 
+// Selector administrativo: evita exponer IDs sin contexto y limita las opciones
+// al aula y año que el editor ya seleccionó.
+exports.listarAsignaciones = async (req, res) => {
+  try {
+    const idAnio = entero(req.query.id_anio_escolar);
+    const idAula = entero(req.query.id_aula);
+    const where = ['aa.activo=TRUE']; const params = [];
+    if (idAnio) { params.push(idAnio); where.push(`aa.id_anio_escolar=$${params.length}`); }
+    if (idAula) { params.push(idAula); where.push(`aa.id_aula=$${params.length}`); }
+    const data = await prisma.$queryRawUnsafe(`SELECT aa.id,aa.id_anio_escolar,aa.id_aula,aa.id_curso,aa.id_docente,c.nombre curso,ar.nombre area,u.nombres docente
+      FROM "tbl_asignaciones_academicas" aa
+      JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
+      JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
+      JOIN "tbl_usuarios" u ON u.id=aa.id_docente
+      WHERE ${where.join(' AND ')} ORDER BY ar.nombre,c.nombre,u.nombres`, ...params);
+    res.json({ data });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron listar las asignaciones académicas' }); }
+};
+
 exports.listarHorarios = async (req, res) => {
   try {
     const where = []; const params = [];

@@ -12,6 +12,7 @@ router.get('/bloques', ...administradores, ctrl.listarBloques);
 router.post('/bloques', ...administradores, ctrl.crearBloque);
 router.put('/bloques/:id', ...administradores, ctrl.actualizarBloque);
 router.patch('/bloques/:id/desactivar', ...administradores, ctrl.desactivarBloque);
+router.get('/asignaciones', ...administradores, ctrl.listarAsignaciones);
 
 router.get('/', ...administradores, ctrl.listarHorarios);
 router.post('/', ...administradores, ctrl.crearBorrador);
