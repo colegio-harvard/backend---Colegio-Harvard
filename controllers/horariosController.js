@@ -179,7 +179,7 @@ exports.actualizarCargaHoraria = async (req, res) => {
 };
 
 exports.listarDocentesDisponibilidad = async (req, res) => {
-  try { const data = await prisma.$queryRawUnsafe(`SELECT u.id,u.nombres FROM "tbl_usuarios" u JOIN "tbl_roles" r ON r.id=u.id_rol WHERE u.estado='ACTIVO' AND r.codigo IN ('DOCENTE','TUTOR') ORDER BY u.nombres`); res.json({ data }); }
+  try { const data = await prisma.$queryRawUnsafe(`SELECT u.id,u.nombres FROM "tbl_usuarios" u JOIN "tbl_roles" r ON r.id=u.id_rol WHERE u.estado='ACTIVO' AND r.codigo='DOCENTE' ORDER BY u.nombres`); res.json({ data }); }
   catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron listar docentes' }); }
 };
 
