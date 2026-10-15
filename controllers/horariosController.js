@@ -73,7 +73,30 @@ async function diagnosticarHorario(db, horario) {
     errores.push(...resultado.errores.map(error => ({ ...error, id_detalle: detalle.id })));
   }
   const unicos = [...new Map(errores.map(error => [`${error.codigo}:${error.id_detalle}`, error])).values()];
-  return { valido: unicos.length === 0, errores: unicos, advertencias: detalles.length ? [] : [{ codigo: 'SIN_CLASES', mensaje: 'El horario aún no tiene clases registradas.' }] };
+  const advertencias = detalles.length ? [] : [{ codigo: 'SIN_CLASES', mensaje: 'El horario aún no tiene clases registradas.' }];
+  const carga = await calcularCargaHoraria(db, horario);
+  carga.forEach(item => {
+    if (item.estado === 'SIN_CONFIGURAR') advertencias.push({ codigo: 'CARGA_SIN_CONFIGURAR', tipo: 'CARGA_SIN_CONFIGURAR', curso: item.curso, docente: item.docente, requeridas: null, asignadas: item.asignadas, mensaje: `${item.curso}: carga semanal sin configurar.` });
+    if (item.estado === 'FALTANTE') advertencias.push({ codigo: 'CARGA_FALTANTE', tipo: 'CARGA_FALTANTE', curso: item.curso, docente: item.docente, requeridas: item.requeridas, asignadas: item.asignadas, mensaje: `${item.curso}: faltan ${item.diferencia} bloque(s) pedagógico(s).` });
+    if (item.estado === 'EXCEDIDO') advertencias.push({ codigo: 'CARGA_EXCEDIDA', tipo: 'CARGA_EXCEDIDA', curso: item.curso, docente: item.docente, requeridas: item.requeridas, asignadas: item.asignadas, mensaje: `${item.curso}: excede ${Math.abs(item.diferencia)} bloque(s) pedagógico(s).` });
+  });
+  return { valido: unicos.length === 0, errores: unicos, advertencias, carga };
+}
+
+async function calcularCargaHoraria(db, horario) {
+  const rows = await db.$queryRawUnsafe(`SELECT aa.id id_asignacion_academica,aa.horas_semanales,c.nombre curso,u.nombres docente,
+    COUNT(d.id) FILTER (WHERE b.tipo='CLASE')::int asignadas
+    FROM "tbl_asignaciones_academicas" aa
+    JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_usuarios" u ON u.id=aa.id_docente
+    LEFT JOIN "tbl_horario_detalles" d ON d.id_asignacion_academica=aa.id AND d.id_horario_escolar=$1
+    LEFT JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario
+    WHERE aa.id_anio_escolar=$2 AND aa.id_aula=$3 AND aa.activo=TRUE
+    GROUP BY aa.id,aa.horas_semanales,c.nombre,u.nombres ORDER BY c.nombre,u.nombres`, horario.id, horario.id_anio_escolar, horario.id_aula);
+  return rows.map(x => {
+    const requeridas = x.horas_semanales === null ? null : Number(x.horas_semanales); const asignadas = Number(x.asignadas || 0);
+    const diferencia = requeridas === null ? null : requeridas - asignadas;
+    return { ...x, requeridas, asignadas, diferencia, estado: requeridas === null ? 'SIN_CONFIGURAR' : diferencia === 0 ? 'COMPLETO' : diferencia > 0 ? 'FALTANTE' : 'EXCEDIDO' };
+  });
 }
 
 exports.listarBloques = async (req, res) => {
@@ -127,7 +150,7 @@ exports.listarAsignaciones = async (req, res) => {
     const where = ['aa.activo=TRUE']; const params = [];
     if (idAnio) { params.push(idAnio); where.push(`aa.id_anio_escolar=$${params.length}`); }
     if (idAula) { params.push(idAula); where.push(`aa.id_aula=$${params.length}`); }
-    const data = await prisma.$queryRawUnsafe(`SELECT aa.id,aa.id_anio_escolar,aa.id_aula,aa.id_curso,aa.id_docente,c.nombre curso,ar.nombre area,u.nombres docente
+    const data = await prisma.$queryRawUnsafe(`SELECT aa.id,aa.id_anio_escolar,aa.id_aula,aa.id_curso,aa.id_docente,aa.horas_semanales,c.nombre curso,ar.nombre area,u.nombres docente
       FROM "tbl_asignaciones_academicas" aa
       JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
       JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
@@ -135,6 +158,22 @@ exports.listarAsignaciones = async (req, res) => {
       WHERE ${where.join(' AND ')} ORDER BY ar.nombre,c.nombre,u.nombres`, ...params);
     res.json({ data });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron listar las asignaciones académicas' }); }
+};
+
+exports.obtenerCargaHoraria = async (req, res) => {
+  try { const horario = await obtenerCabecera(prisma, entero(req.params.id)); if (!horario) return res.status(404).json({ error: 'Horario no encontrado' }); res.json({ data: await calcularCargaHoraria(prisma, horario) }); }
+  catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo obtener la carga horaria' }); }
+};
+
+exports.actualizarCargaHoraria = async (req, res) => {
+  try {
+    const id = entero(req.params.id); const horas = entero(req.body.horas_semanales);
+    if (!id || !horas || horas > 60) return res.status(400).json({ error: 'Las horas semanales deben ser un entero entre 1 y 60.' });
+    const rows = await prisma.$queryRawUnsafe('UPDATE "tbl_asignaciones_academicas" SET horas_semanales=$1 WHERE id=$2 RETURNING *', horas, id);
+    if (!rows[0]) return res.status(404).json({ error: 'Asignación académica no encontrada' });
+    await registrarAuditoria({ userId: req.user.id, accion: 'ACTUALIZAR_CARGA_HORARIA', tipoEntidad: 'tbl_asignaciones_academicas', idEntidad: id, resumen: `Carga semanal configurada: ${horas} bloque(s)`, req });
+    res.json({ data: rows[0] });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo actualizar la carga horaria' }); }
 };
 
 exports.listarHorarios = async (req, res) => {
