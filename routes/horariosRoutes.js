@@ -19,6 +19,8 @@ router.get('/disponibilidad/docentes', ...administradores, ctrl.listarDocentesDi
 router.get('/disponibilidad', ...administradores, ctrl.obtenerDisponibilidad);
 router.put('/disponibilidad', ...administradores, ctrl.guardarDisponibilidad);
 router.delete('/disponibilidad', ...administradores, ctrl.restaurarDisponibilidad);
+router.post('/generar/analizar', ...administradores, ctrl.analizarGeneracion);
+router.post('/generar', ...administradores, ctrl.generarHorario);
 
 router.get('/', ...administradores, ctrl.listarHorarios);
 router.post('/', ...administradores, ctrl.crearBorrador);

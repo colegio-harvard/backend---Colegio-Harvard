@@ -101,6 +101,72 @@ async function calcularCargaHoraria(db, horario) {
   });
 }
 
+// Generador determinista: programa primero las asignaciones con mayor carga y
+// elige la celda legal con menor repetición del curso en ese día.
+async function contextoGeneracion(db, idAnio, idAula) {
+  const aulas = await db.$queryRawUnsafe(`SELECT a.id,a.id_anio_escolar,g.id_nivel FROM "tbl_aulas" a JOIN "tbl_grados" g ON g.id=a.id_grado WHERE a.id=$1 AND a.id_anio_escolar=$2`, idAula, idAnio);
+  const aula = aulas[0];
+  if (!aula) return { errores: ['La sección no pertenece al año escolar indicado.'] };
+  const [bloques, asignaciones] = await Promise.all([
+    db.$queryRawUnsafe(`SELECT * FROM "tbl_bloques_horarios" WHERE id_anio_escolar=$1 AND id_nivel=$2 AND activo=TRUE AND tipo='CLASE' ORDER BY orden`, idAnio, aula.id_nivel),
+    db.$queryRawUnsafe(`SELECT aa.*,c.nombre curso,u.nombres docente,u.estado estado_docente FROM "tbl_asignaciones_academicas" aa JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_usuarios" u ON u.id=aa.id_docente WHERE aa.id_anio_escolar=$1 AND aa.id_aula=$2 AND aa.activo=TRUE ORDER BY aa.horas_semanales DESC,c.nombre`, idAnio, idAula),
+  ]);
+  const errores = [];
+  if (!bloques.length) errores.push('No existen bloques de clase activos para esta sección.');
+  if (!asignaciones.length) errores.push('No existen asignaciones académicas activas para esta sección.');
+  asignaciones.forEach(a => { if (!a.horas_semanales) errores.push(`${a.curso}: carga semanal sin configurar.`); if (a.estado_docente !== 'ACTIVO') errores.push(`${a.curso}: docente no activo.`); });
+  const requeridos = asignaciones.reduce((total, a) => total + (Number(a.horas_semanales) || 0), 0);
+  const disponibles = bloques.length * 5;
+  if (requeridos > disponibles) errores.push(`Solo existen ${disponibles} bloques disponibles y se requieren ${requeridos}.`);
+  return { aula, bloques, asignaciones, requeridos, disponibles, errores };
+}
+
+async function proponerDetalles(db, contexto, horario) {
+  const dias = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES'];
+  const propuestos = []; const ocupados = new Set(); const docentesOcupados = new Set(); const porDia = new Map();
+  for (const asignacion of contexto.asignaciones) {
+    for (let numero = 0; numero < Number(asignacion.horas_semanales); numero += 1) {
+      const candidatos = [];
+      for (const dia of dias) for (const bloque of contexto.bloques) {
+        const celda = `${dia}:${bloque.id}`;
+        if (ocupados.has(celda) || docentesOcupados.has(`${asignacion.id_docente}:${celda}`)) continue;
+        const resultado = await validarDetalle(db, horario, { id_asignacion_academica: asignacion.id, id_bloque_horario: bloque.id, dia_semana: dia });
+        if (resultado.errores.length) continue;
+        const mismoDia = porDia.get(`${asignacion.id}:${dia}`) || 0;
+        const consecutivos = propuestos.filter(x => x.id_asignacion_academica === asignacion.id && x.dia_semana === dia).length;
+        candidatos.push({ dia, bloque, penalidad: mismoDia * 20 + consecutivos * 5 + Number(bloque.orden) / 100 });
+      }
+      candidatos.sort((a, b) => a.penalidad - b.penalidad || a.dia.localeCompare(b.dia) || a.bloque.orden - b.bloque.orden);
+      const elegido = candidatos[0];
+      if (!elegido) return { error: `No se encontró una celda válida para ${asignacion.curso}.`, propuestos };
+      const detalle = { id_asignacion_academica: asignacion.id, id_bloque_horario: elegido.bloque.id, dia_semana: elegido.dia };
+      propuestos.push(detalle); ocupados.add(`${elegido.dia}:${elegido.bloque.id}`); docentesOcupados.add(`${asignacion.id_docente}:${elegido.dia}:${elegido.bloque.id}`); porDia.set(`${asignacion.id}:${elegido.dia}`, (porDia.get(`${asignacion.id}:${elegido.dia}`) || 0) + 1);
+    }
+  }
+  return { propuestos };
+}
+
+exports.analizarGeneracion = async (req, res) => {
+  try { const idAnio = entero(req.body.id_anio_escolar), idAula = entero(req.body.id_aula); if (!idAnio || !idAula) return res.status(400).json({ error: 'Año escolar y sección son obligatorios.' }); const contexto = await contextoGeneracion(prisma, idAnio, idAula); if (contexto.errores.length) return res.json({ posible: false, errores: contexto.errores, bloquesDisponibles: contexto.disponibles || 0, bloquesRequeridos: contexto.requeridos || 0 }); const propuesta = await proponerDetalles(prisma, contexto, { id: -1, id_anio_escolar: idAnio, id_aula: idAula, id_nivel: contexto.aula.id_nivel }); res.json({ posible: !propuesta.error, errores: propuesta.error ? [propuesta.error] : [], bloquesDisponibles: contexto.disponibles, bloquesRequeridos: contexto.requeridos, asignaciones: contexto.asignaciones.length, restriccionesRespetadas: true }); }
+  catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo analizar la generación.' }); }
+};
+
+exports.generarHorario = async (req, res) => {
+  try {
+    const idAnio = entero(req.body.id_anio_escolar), idAula = entero(req.body.id_aula); if (!idAnio || !idAula) return res.status(400).json({ error: 'Año escolar y sección son obligatorios.' });
+    const horario = await prisma.$transaction(async tx => {
+      const contexto = await contextoGeneracion(tx, idAnio, idAula); if (contexto.errores.length) throw Object.assign(new Error('GENERACION_NO_POSIBLE'), { errores: contexto.errores });
+      const siguiente = await tx.$queryRawUnsafe('SELECT COALESCE(MAX(version),0)+1 siguiente FROM "tbl_horarios_escolares" WHERE id_anio_escolar=$1 AND id_aula=$2', idAnio, idAula);
+      const creado = (await tx.$queryRawUnsafe('INSERT INTO "tbl_horarios_escolares" (id_anio_escolar,id_aula,version,estado,creado_por) VALUES ($1,$2,$3,\'BORRADOR\',$4) RETURNING *', idAnio, idAula, siguiente[0].siguiente, req.user.id))[0];
+      const propuesta = await proponerDetalles(tx, contexto, { ...creado, id_nivel: contexto.aula.id_nivel }); if (propuesta.error) throw Object.assign(new Error('GENERACION_NO_POSIBLE'), { errores: [propuesta.error] });
+      for (const detalle of propuesta.propuestos) await tx.$queryRawUnsafe('INSERT INTO "tbl_horario_detalles" (id_horario_escolar,id_bloque_horario,dia_semana,id_asignacion_academica,creado_por) VALUES ($1,$2,$3,$4,$5)', creado.id, detalle.id_bloque_horario, detalle.dia_semana, detalle.id_asignacion_academica, req.user.id);
+      const diagnostico = await diagnosticarHorario(tx, { ...creado, id_nivel: contexto.aula.id_nivel }); if (!diagnostico.valido) throw Object.assign(new Error('GENERACION_INVALIDA'), { errores: diagnostico.errores.map(x => x.mensaje) });
+      return { ...creado, resumen: { bloquesAsignados: propuesta.propuestos.length, cursos: contexto.asignaciones.length, conflictos: 0 } };
+    });
+    await registrarAuditoria({ userId:req.user.id, accion:'GENERAR_HORARIO_AUTOMATICO', tipoEntidad:'tbl_horarios_escolares', idEntidad:horario.id, resumen:`Horario automático borrador v${horario.version}`, req }); res.status(201).json({ data: horario });
+  } catch (error) { const status = ['GENERACION_NO_POSIBLE','GENERACION_INVALIDA'].includes(error.message) ? 409 : 500; res.status(status).json({ error: error.message === 'GENERACION_INVALIDA' ? 'La propuesta no pasó la validación final.' : error.message === 'GENERACION_NO_POSIBLE' ? 'No se puede generar el horario.' : 'No se pudo generar el horario.', errores: error.errores || [] }); }
+};
+
 exports.listarBloques = async (req, res) => {
   try {
     const where = []; const params = [];
