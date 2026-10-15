@@ -52,6 +52,8 @@ async function validarDetalle(db, horario, detalle, excluirDetalleId = null) {
     errores.push({ codigo: 'ASIGNACION_INCOMPATIBLE', mensaje: 'La asignación académica no pertenece al aula o año escolar del horario.' });
   }
   if (!errores.length) {
+    const noDisponible = await db.$queryRawUnsafe(`SELECT observacion FROM "tbl_disponibilidad_docente" WHERE id_docente=$1 AND id_anio_escolar=$2 AND id_bloque_horario=$3 AND dia_semana=$4 AND disponible=FALSE LIMIT 1`, asignacion.id_docente, horario.id_anio_escolar, idBloque, dia);
+    if (noDisponible[0]) errores.push({ codigo: 'DOCENTE_NO_DISPONIBLE', mensaje: `El docente ${asignacion.docente} no está disponible el ${dia} de ${bloque.hora_inicio} a ${bloque.hora_fin}.` });
     const conflictoSeccion = await db.$queryRawUnsafe(`SELECT d.id FROM "tbl_horario_detalles" d
       WHERE d.id_horario_escolar=$1 AND d.dia_semana=$2 AND d.id_bloque_horario=$3${excluirDetalleId ? ' AND d.id<>$4' : ''} LIMIT 1`, ...(excluirDetalleId ? [horario.id, dia, idBloque, excluirDetalleId] : [horario.id, dia, idBloque]));
     if (conflictoSeccion[0]) errores.push({ codigo: 'CONFLICTO_SECCION', mensaje: 'La sección ya tiene una clase en ese día y bloque.' });
@@ -175,6 +177,23 @@ exports.actualizarCargaHoraria = async (req, res) => {
     res.json({ data: rows[0] });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo actualizar la carga horaria' }); }
 };
+
+exports.listarDocentesDisponibilidad = async (req, res) => {
+  try { const data = await prisma.$queryRawUnsafe(`SELECT u.id,u.nombres FROM "tbl_usuarios" u JOIN "tbl_roles" r ON r.id=u.id_rol WHERE u.estado='ACTIVO' AND r.codigo IN ('DOCENTE','TUTOR') ORDER BY u.nombres`); res.json({ data }); }
+  catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron listar docentes' }); }
+};
+
+exports.obtenerDisponibilidad = async (req, res) => {
+  try { const docente=entero(req.query.id_docente), anio=entero(req.query.id_anio_escolar); if(!docente||!anio) return res.status(400).json({error:'Docente y año escolar son obligatorios'}); const data=await prisma.$queryRawUnsafe('SELECT * FROM "tbl_disponibilidad_docente" WHERE id_docente=$1 AND id_anio_escolar=$2 ORDER BY dia_semana,id_bloque_horario',docente,anio); res.json({data}); }
+  catch(error){console.error(error);res.status(500).json({error:'No se pudo obtener disponibilidad'});}
+};
+
+exports.guardarDisponibilidad = async (req,res) => {
+  try { const docente=entero(req.body.id_docente),anio=entero(req.body.id_anio_escolar),bloque=entero(req.body.id_bloque_horario),dia=normalizarDia(req.body.dia_semana); if(!docente||!anio||!bloque||!DIAS.has(dia)) return res.status(400).json({error:'Datos de disponibilidad inválidos'}); const conflictos=await prisma.$queryRawUnsafe(`SELECT h.estado,c.nombre curso,a.seccion,b.hora_inicio,b.hora_fin FROM "tbl_horario_detalles" d JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_aulas" a ON a.id=h.id_aula JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario WHERE aa.id_docente=$1 AND h.id_anio_escolar=$2 AND d.id_bloque_horario=$3 AND d.dia_semana=$4 AND h.estado<>'ARCHIVADO'`,docente,anio,bloque,dia); const rows=await prisma.$queryRawUnsafe(`INSERT INTO "tbl_disponibilidad_docente" (id_docente,id_anio_escolar,id_bloque_horario,dia_semana,disponible,observacion,creado_por) VALUES ($1,$2,$3,$4,FALSE,$5,$6) ON CONFLICT (id_docente,id_anio_escolar,dia_semana,id_bloque_horario) DO UPDATE SET disponible=FALSE,observacion=EXCLUDED.observacion,actualizado_por=$6,actualizado_en=NOW() RETURNING *`,docente,anio,bloque,dia,texto(req.body.observacion)||null,req.user.id); await registrarAuditoria({userId:req.user.id,accion:'MARCAR_DOCENTE_NO_DISPONIBLE',tipoEntidad:'tbl_disponibilidad_docente',idEntidad:rows[0].id,resumen:`Indisponibilidad ${dia}`,req}); res.json({data:rows[0],conflictos}); }
+  catch(error){console.error(error);res.status(500).json({error:'No se pudo guardar disponibilidad'});}
+};
+
+exports.restaurarDisponibilidad = async (req,res) => { try { const docente=entero(req.body.id_docente),anio=entero(req.body.id_anio_escolar),bloque=entero(req.body.id_bloque_horario),dia=normalizarDia(req.body.dia_semana); const rows=await prisma.$queryRawUnsafe('DELETE FROM "tbl_disponibilidad_docente" WHERE id_docente=$1 AND id_anio_escolar=$2 AND id_bloque_horario=$3 AND dia_semana=$4 RETURNING *',docente,anio,bloque,dia); if(rows[0]) await registrarAuditoria({userId:req.user.id,accion:'RESTAURAR_DISPONIBILIDAD_DOCENTE',tipoEntidad:'tbl_disponibilidad_docente',idEntidad:rows[0].id,resumen:`Disponibilidad restaurada ${dia}`,req}); res.json({data:rows[0]||null}); } catch(error){console.error(error);res.status(500).json({error:'No se pudo restaurar disponibilidad'});} };
 
 exports.listarHorarios = async (req, res) => {
   try {
