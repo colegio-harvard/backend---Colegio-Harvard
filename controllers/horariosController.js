@@ -33,10 +33,11 @@ async function validarDetalle(db, horario, detalle, excluirDetalleId = null) {
   }
   const [bloques, asignaciones] = await Promise.all([
     db.$queryRawUnsafe('SELECT * FROM "tbl_bloques_horarios" WHERE id=$1', idBloque),
-    db.$queryRawUnsafe(`SELECT aa.*,u.nombres docente,c.nombre curso
+    db.$queryRawUnsafe(`SELECT aa.*,u.nombres docente,COALESCE(dca.nombre_presentacion,c.nombre) curso
       FROM "tbl_asignaciones_academicas" aa
       JOIN "tbl_usuarios" u ON u.id=aa.id_docente
       JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
+      LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=aa.id_anio_escolar AND dca.id_curso=aa.id_curso
       WHERE aa.id=$1`, idAsignacion),
   ]);
   const bloque = bloques[0] || null;
@@ -101,10 +102,10 @@ async function diagnosticarHorario(db, horario) {
 }
 
 async function calcularCargaHoraria(db, horario) {
-  const rows = await db.$queryRawUnsafe(`SELECT aa.id id_asignacion_academica,aa.horas_semanales,c.nombre curso,u.nombres docente,
+  const rows = await db.$queryRawUnsafe(`SELECT aa.id id_asignacion_academica,aa.horas_semanales,COALESCE(dca.nombre_presentacion,c.nombre) curso,u.nombres docente,
     COUNT(d.id) FILTER (WHERE b.tipo='CLASE')::int asignadas
     FROM "tbl_asignaciones_academicas" aa
-    JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_usuarios" u ON u.id=aa.id_docente
+    JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=aa.id_anio_escolar AND dca.id_curso=aa.id_curso JOIN "tbl_usuarios" u ON u.id=aa.id_docente
     LEFT JOIN "tbl_horario_detalles" d ON d.id_asignacion_academica=aa.id AND d.id_horario_escolar=$1
     LEFT JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario
     WHERE aa.id_anio_escolar=$2 AND aa.id_aula=$3 AND aa.activo=TRUE
@@ -124,7 +125,7 @@ async function contextoGeneracion(db, idAnio, idAula) {
   if (!aula) return { errores: ['La sección no pertenece al año escolar indicado.'] };
   const [bloques, asignaciones] = await Promise.all([
     db.$queryRawUnsafe(`SELECT * FROM "tbl_bloques_horarios" WHERE id_anio_escolar=$1 AND id_nivel=$2 AND activo=TRUE AND tipo='CLASE' ORDER BY orden`, idAnio, aula.id_nivel),
-    db.$queryRawUnsafe(`SELECT aa.*,c.nombre curso,u.nombres docente,u.estado estado_docente FROM "tbl_asignaciones_academicas" aa JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_usuarios" u ON u.id=aa.id_docente WHERE aa.id_anio_escolar=$1 AND aa.id_aula=$2 AND aa.activo=TRUE ORDER BY aa.horas_semanales DESC,c.nombre`, idAnio, idAula),
+    db.$queryRawUnsafe(`SELECT aa.*,COALESCE(dca.nombre_presentacion,c.nombre) curso,u.nombres docente,u.estado estado_docente FROM "tbl_asignaciones_academicas" aa JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=aa.id_anio_escolar AND dca.id_curso=aa.id_curso JOIN "tbl_usuarios" u ON u.id=aa.id_docente WHERE aa.id_anio_escolar=$1 AND aa.id_aula=$2 AND aa.activo=TRUE ORDER BY aa.horas_semanales DESC,c.nombre`, idAnio, idAula),
   ]);
   const errores = [];
   if (!bloques.length) errores.push('No existen bloques de clase activos para esta sección.');
@@ -237,9 +238,10 @@ exports.listarAsignaciones = async (req, res) => {
     const where = ['aa.activo=TRUE']; const params = [];
     if (idAnio) { params.push(idAnio); where.push(`aa.id_anio_escolar=$${params.length}`); }
     if (idAula) { params.push(idAula); where.push(`aa.id_aula=$${params.length}`); }
-    const data = await prisma.$queryRawUnsafe(`SELECT aa.id,aa.id_anio_escolar,aa.id_aula,aa.id_curso,aa.id_docente,aa.horas_semanales,c.nombre curso,ar.nombre area,u.nombres docente
+    const data = await prisma.$queryRawUnsafe(`SELECT aa.id,aa.id_anio_escolar,aa.id_aula,aa.id_curso,aa.id_docente,aa.horas_semanales,COALESCE(dca.nombre_presentacion,c.nombre) curso,ar.nombre area,u.nombres docente
       FROM "tbl_asignaciones_academicas" aa
       JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
+      LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=aa.id_anio_escolar AND dca.id_curso=aa.id_curso
       JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
       JOIN "tbl_usuarios" u ON u.id=aa.id_docente
       WHERE ${where.join(' AND ')} ORDER BY ar.nombre,c.nombre,u.nombres`, ...params);
@@ -283,7 +285,7 @@ exports.obtenerDisponibilidad = async (req, res) => {
 };
 
 exports.guardarDisponibilidad = async (req,res) => {
-  try { const docente=entero(req.body.id_docente),anio=entero(req.body.id_anio_escolar),bloque=entero(req.body.id_bloque_horario),dia=normalizarDia(req.body.dia_semana); if(!docente||!anio||!bloque||!DIAS.has(dia)) return res.status(400).json({error:'Datos de disponibilidad inválidos'}); const conflictos=await prisma.$queryRawUnsafe(`SELECT h.estado,c.nombre curso,a.seccion,b.hora_inicio,b.hora_fin FROM "tbl_horario_detalles" d JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_aulas" a ON a.id=h.id_aula JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario WHERE aa.id_docente=$1 AND h.id_anio_escolar=$2 AND d.id_bloque_horario=$3 AND d.dia_semana=$4 AND h.estado<>'ARCHIVADO'`,docente,anio,bloque,dia); const rows=await prisma.$queryRawUnsafe(`INSERT INTO "tbl_disponibilidad_docente" (id_docente,id_anio_escolar,id_bloque_horario,dia_semana,disponible,observacion,creado_por) VALUES ($1,$2,$3,$4,FALSE,$5,$6) ON CONFLICT (id_docente,id_anio_escolar,dia_semana,id_bloque_horario) DO UPDATE SET disponible=FALSE,observacion=EXCLUDED.observacion,actualizado_por=$6,actualizado_en=NOW() RETURNING *`,docente,anio,bloque,dia,texto(req.body.observacion)||null,req.user.id); await registrarAuditoria({userId:req.user.id,accion:'MARCAR_DOCENTE_NO_DISPONIBLE',tipoEntidad:'tbl_disponibilidad_docente',idEntidad:rows[0].id,resumen:`Indisponibilidad ${dia}`,req}); res.json({data:rows[0],conflictos}); }
+  try { const docente=entero(req.body.id_docente),anio=entero(req.body.id_anio_escolar),bloque=entero(req.body.id_bloque_horario),dia=normalizarDia(req.body.dia_semana); if(!docente||!anio||!bloque||!DIAS.has(dia)) return res.status(400).json({error:'Datos de disponibilidad inválidos'}); const conflictos=await prisma.$queryRawUnsafe(`SELECT h.estado,COALESCE(dca.nombre_presentacion,c.nombre) curso,a.seccion,b.hora_inicio,b.hora_fin FROM "tbl_horario_detalles" d JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=h.id_anio_escolar AND dca.id_curso=aa.id_curso JOIN "tbl_aulas" a ON a.id=h.id_aula JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario WHERE aa.id_docente=$1 AND h.id_anio_escolar=$2 AND d.id_bloque_horario=$3 AND d.dia_semana=$4 AND h.estado<>'ARCHIVADO'`,docente,anio,bloque,dia); const rows=await prisma.$queryRawUnsafe(`INSERT INTO "tbl_disponibilidad_docente" (id_docente,id_anio_escolar,id_bloque_horario,dia_semana,disponible,observacion,creado_por) VALUES ($1,$2,$3,$4,FALSE,$5,$6) ON CONFLICT (id_docente,id_anio_escolar,dia_semana,id_bloque_horario) DO UPDATE SET disponible=FALSE,observacion=EXCLUDED.observacion,actualizado_por=$6,actualizado_en=NOW() RETURNING *`,docente,anio,bloque,dia,texto(req.body.observacion)||null,req.user.id); await registrarAuditoria({userId:req.user.id,accion:'MARCAR_DOCENTE_NO_DISPONIBLE',tipoEntidad:'tbl_disponibilidad_docente',idEntidad:rows[0].id,resumen:`Indisponibilidad ${dia}`,req}); res.json({data:rows[0],conflictos}); }
   catch(error){console.error(error);res.status(500).json({error:'No se pudo guardar disponibilidad'});}
 };
 
@@ -318,7 +320,7 @@ exports.obtenerHorario = async (req, res) => {
     const horario = await obtenerCabecera(prisma, entero(req.params.id));
     if (!horario) return res.status(404).json({ error: 'Horario no encontrado' });
     const [detalles, bloques] = await Promise.all([
-      prisma.$queryRawUnsafe(`SELECT d.*,b.nombre bloque,b.orden,b.hora_inicio,b.hora_fin,b.tipo,aa.id_docente,u.nombres docente,c.nombre curso,ar.nombre area,ef.nombre espacio_fisico FROM "tbl_horario_detalles" d JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_usuarios" u ON u.id=aa.id_docente JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area LEFT JOIN "tbl_espacios_fisicos" ef ON ef.id=d.id_espacio_fisico WHERE d.id_horario_escolar=$1 ORDER BY d.dia_semana,b.orden`, horario.id),
+      prisma.$queryRawUnsafe(`SELECT d.*,b.nombre bloque,b.orden,b.hora_inicio,b.hora_fin,b.tipo,aa.id_docente,u.nombres docente,COALESCE(dca.nombre_presentacion,c.nombre) curso,ar.nombre area,ef.nombre espacio_fisico FROM "tbl_horario_detalles" d JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_usuarios" u ON u.id=aa.id_docente JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=$2 AND dca.id_curso=aa.id_curso LEFT JOIN "tbl_espacios_fisicos" ef ON ef.id=d.id_espacio_fisico WHERE d.id_horario_escolar=$1 ORDER BY d.dia_semana,b.orden`, horario.id, horario.id_anio_escolar),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_bloques_horarios" WHERE id_anio_escolar=$1 AND id_nivel=$2 ORDER BY orden', horario.id_anio_escolar, horario.id_nivel),
     ]);
     res.json({ data: { ...horario, detalles, bloques } });
@@ -452,7 +454,7 @@ exports.misHorariosPadre = async (req, res) => {
       if (!horario) return { alumno: { id: hijo.id_alumno, codigo: hijo.codigo_alumno, nombre: hijo.nombre_completo }, aula: { id: hijo.id_aula, seccion: hijo.seccion, grado: hijo.grado, nivel: hijo.nivel, anio: hijo.anio }, horarioPublicado: false, bloques: [], clases: [] };
       const [bloques, clases] = await Promise.all([
         prisma.$queryRawUnsafe('SELECT id,nombre,orden,hora_inicio,hora_fin,tipo FROM "tbl_bloques_horarios" WHERE id_anio_escolar=$1 AND id_nivel=$2 AND activo=TRUE ORDER BY orden', hijo.id_anio_escolar, hijo.id_nivel),
-        prisma.$queryRawUnsafe(`SELECT d.id,d.dia_semana,d.id_bloque_horario,d.observacion,c.nombre curso,ar.nombre area,u.nombres docente,ef.nombre espacio_fisico FROM "tbl_horario_detalles" d JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area JOIN "tbl_usuarios" u ON u.id=aa.id_docente LEFT JOIN "tbl_espacios_fisicos" ef ON ef.id=d.id_espacio_fisico WHERE d.id_horario_escolar=$1 ORDER BY d.dia_semana,d.id_bloque_horario`, horario.id),
+        prisma.$queryRawUnsafe(`SELECT d.id,d.dia_semana,d.id_bloque_horario,d.observacion,COALESCE(dca.nombre_presentacion,c.nombre) curso,ar.nombre area,u.nombres docente,ef.nombre espacio_fisico FROM "tbl_horario_detalles" d JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area JOIN "tbl_usuarios" u ON u.id=aa.id_docente LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=h.id_anio_escolar AND dca.id_curso=aa.id_curso LEFT JOIN "tbl_espacios_fisicos" ef ON ef.id=d.id_espacio_fisico WHERE d.id_horario_escolar=$1 ORDER BY d.dia_semana,d.id_bloque_horario`, horario.id),
       ]);
       return { alumno: { id: hijo.id_alumno, codigo: hijo.codigo_alumno, nombre: hijo.nombre_completo }, aula: { id: hijo.id_aula, seccion: hijo.seccion, grado: hijo.grado, nivel: hijo.nivel, anio: hijo.anio }, horarioPublicado: true, horario: { id: horario.id, version: horario.version, publicado_en: horario.publicado_en }, bloques, clases };
     }));
@@ -462,8 +464,8 @@ exports.misHorariosPadre = async (req, res) => {
 
 exports.miHorarioDocente = async (req, res) => {
   try {
-    const clases = await prisma.$queryRawUnsafe(`SELECT d.dia_semana,d.observacion,b.nombre bloque,b.hora_inicio,b.hora_fin,b.tipo,c.nombre curso,n.nombre nivel,g.nombre grado,a.seccion,ae.anio,u.nombres docente,ef.nombre espacio_fisico
-      FROM "tbl_horario_detalles" d JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_aulas" a ON a.id=h.id_aula JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_niveles" n ON n.id=g.id_nivel JOIN "tbl_anios_escolares" ae ON ae.id=h.id_anio_escolar JOIN "tbl_usuarios" u ON u.id=aa.id_docente LEFT JOIN "tbl_espacios_fisicos" ef ON ef.id=d.id_espacio_fisico WHERE aa.id_docente=$1 AND h.estado='PUBLICADO' ORDER BY ae.anio DESC,b.hora_inicio,d.dia_semana`, req.user.id);
+    const clases = await prisma.$queryRawUnsafe(`SELECT d.dia_semana,d.observacion,b.nombre bloque,b.hora_inicio,b.hora_fin,b.tipo,COALESCE(dca.nombre_presentacion,c.nombre) curso,n.nombre nivel,g.nombre grado,a.seccion,ae.anio,u.nombres docente,ef.nombre espacio_fisico
+      FROM "tbl_horario_detalles" d JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_aulas" a ON a.id=h.id_aula JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_niveles" n ON n.id=g.id_nivel JOIN "tbl_anios_escolares" ae ON ae.id=h.id_anio_escolar JOIN "tbl_usuarios" u ON u.id=aa.id_docente LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=h.id_anio_escolar AND dca.id_curso=aa.id_curso LEFT JOIN "tbl_espacios_fisicos" ef ON ef.id=d.id_espacio_fisico WHERE aa.id_docente=$1 AND h.estado='PUBLICADO' ORDER BY ae.anio DESC,b.hora_inicio,d.dia_semana`, req.user.id);
     res.json({ data: { docente: clases[0]?.docente || req.user.nombres || '', anio: clases[0]?.anio || null, clases } });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo obtener el horario docente' }); }
 };

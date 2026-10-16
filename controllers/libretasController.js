@@ -63,9 +63,10 @@ const asegurarPeriodos = async (idAnio, userId) => {
 
 const obtenerAsignacion = async (id, req) => {
   const rows = await prisma.$queryRawUnsafe(`
-    SELECT aa.*, c.nombre curso, ar.nombre area, a.seccion, g.nombre grado,n.nombre nivel
+    SELECT aa.*, COALESCE(dca.nombre_presentacion,c.nombre) curso, ar.nombre area, a.seccion, g.nombre grado,n.nombre nivel
     FROM "tbl_asignaciones_academicas" aa
     JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
+    LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=aa.id_anio_escolar AND dca.id_curso=aa.id_curso
     JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
     JOIN "tbl_aulas" a ON a.id=aa.id_aula JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_niveles" n ON n.id=g.id_nivel
     WHERE aa.id=$1 AND aa.activo=TRUE`, Number(id));
@@ -97,9 +98,10 @@ const bootstrap = async (req, res) => {
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_catalogo_libreta" WHERE activo=TRUE ORDER BY tipo,categoria,orden,texto'),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_criterios_conducta" WHERE activo=TRUE ORDER BY orden,nombre'),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_criterios_padre" WHERE activo=TRUE ORDER BY orden,nombre'),
-      prisma.$queryRawUnsafe(`SELECT aa.id,aa.id_aula,aa.id_curso,aa.id_docente,c.nombre curso,ar.nombre area,
+      prisma.$queryRawUnsafe(`SELECT aa.id,aa.id_aula,aa.id_curso,aa.id_docente,COALESCE(dca.nombre_presentacion,c.nombre) curso,ar.nombre area,
         g.nombre grado,a.seccion,n.nombre nivel,u.nombres docente
         FROM "tbl_asignaciones_academicas" aa JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
+        LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=aa.id_anio_escolar AND dca.id_curso=aa.id_curso
         JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area JOIN "tbl_aulas" a ON a.id=aa.id_aula
         JOIN "tbl_grados" g ON g.id=a.id_grado JOIN "tbl_niveles" n ON n.id=g.id_nivel JOIN "tbl_usuarios" u ON u.id=aa.id_docente
         WHERE aa.id_anio_escolar=$1 AND aa.activo=TRUE AND c.activo=TRUE AND ar.activo=TRUE ${filtroDocente}
@@ -487,10 +489,11 @@ const cambiarCatalogo = async (req, res) => {
 const auditoriaNotas = async (req, res) => {
   try {
     const rows = await prisma.$queryRawUnsafe(`SELECT au.id,au.fecha,au.calificacion_anterior,au.calificacion_nueva,au.nota_numerica_anterior,au.nota_numerica_nueva,au.motivo,
-      u.nombres usuario,al.codigo_alumno,al.nombre_completo alumno,c.nombre curso,p.nombre periodo
+      u.nombres usuario,al.codigo_alumno,al.nombre_completo alumno,COALESCE(dca.nombre_presentacion,c.nombre) curso,p.nombre periodo
       FROM "tbl_auditoria_notas" au JOIN "tbl_usuarios" u ON u.id=au.id_usuario
       JOIN "tbl_notas_academicas" n ON n.id=au.id_nota JOIN "tbl_alumnos" al ON al.id=n.id_alumno
       JOIN "tbl_asignaciones_academicas" aa ON aa.id=n.id_asignacion JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
+      LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=aa.id_anio_escolar AND dca.id_curso=aa.id_curso
       JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo ORDER BY au.fecha DESC LIMIT 500`);
     res.json({ data: rows });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo cargar la auditorÃ­a de notas' }); }
@@ -528,16 +531,18 @@ const libreta = async (req, res) => {
     const nivelAlumno = String(alumno.nivel || '').toUpperCase();
     const nivelCatalogo = nivelAlumno.includes('PRIMARIA') ? 'PRIMARIA' : nivelAlumno.includes('SECUNDARIA') ? 'SECUNDARIA' : null;
     const consultaNotas = nivelCatalogo
-      ? prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion,n.nota_numerica
+      ? prisma.$queryRawUnsafe(`SELECT ar.nombre area,COALESCE(dca.nombre_presentacion,c.nombre) curso,p.numero,n.calificacion,n.nota_numerica
         FROM "tbl_cursos_academicos" c JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
+        LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=$2 AND dca.id_curso=c.id
         LEFT JOIN "tbl_asignaciones_academicas" aa ON aa.id_curso=c.id AND aa.id_aula=(SELECT id_aula FROM "tbl_alumnos" WHERE id=$1)
           AND aa.id_anio_escolar=$2 AND aa.activo=TRUE
         LEFT JOIN "tbl_notas_academicas" n ON n.id_asignacion=aa.id AND n.id_alumno=$1
         LEFT JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo
         WHERE c.activo=TRUE AND ar.activo=TRUE AND c.nivel=$3 ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0),nivelCatalogo)
-      : prisma.$queryRawUnsafe(`SELECT ar.nombre area,c.nombre curso,p.numero,n.calificacion,n.nota_numerica
+      : prisma.$queryRawUnsafe(`SELECT ar.nombre area,COALESCE(dca.nombre_presentacion,c.nombre) curso,p.numero,n.calificacion,n.nota_numerica
         FROM "tbl_notas_academicas" n JOIN "tbl_asignaciones_academicas" aa ON aa.id=n.id_asignacion
         JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area
+        LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=aa.id_anio_escolar AND dca.id_curso=aa.id_curso
         JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo WHERE n.id_alumno=$1 AND aa.id_anio_escolar=$2 ORDER BY ar.orden,c.orden,p.numero`,idAlumno,Number(alumno.id_anio_escolar || 0));
     const [notas, conducta, notasPadre, observaciones, criterios, criteriosPadre] = await Promise.all([
       consultaNotas,
@@ -547,11 +552,12 @@ const libreta = async (req, res) => {
       prisma.$queryRawUnsafe(`SELECT c.nombre,c.id id_criterio,p.numero,n.calificacion FROM "tbl_notas_padre" n
       JOIN "tbl_criterios_padre" c ON c.id=n.id_criterio JOIN "tbl_periodos_academicos" p ON p.id=n.id_periodo
       WHERE n.id_alumno=$1 ORDER BY c.orden,p.numero`,idAlumno),
-      prisma.$queryRawUnsafe(`SELECT o.tipo,p.numero,c.texto,u.nombres autor,o.id_asignacion,curso.nombre curso FROM "tbl_observaciones_libreta" o
+      prisma.$queryRawUnsafe(`SELECT o.tipo,p.numero,c.texto,u.nombres autor,o.id_asignacion,COALESCE(dca.nombre_presentacion,curso.nombre) curso FROM "tbl_observaciones_libreta" o
       JOIN "tbl_catalogo_libreta" c ON c.id=o.id_catalogo JOIN "tbl_periodos_academicos" p ON p.id=o.id_periodo
       JOIN "tbl_usuarios" u ON u.id=o.creado_por
       LEFT JOIN "tbl_asignaciones_academicas" asignacion ON asignacion.id=o.id_asignacion
       LEFT JOIN "tbl_cursos_academicos" curso ON curso.id=asignacion.id_curso
+      LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=asignacion.id_anio_escolar AND dca.id_curso=asignacion.id_curso
       WHERE o.id_alumno=$1 ORDER BY p.numero,o.tipo`,idAlumno),
       prisma.$queryRawUnsafe(`SELECT nombre FROM "tbl_criterios_conducta" WHERE activo=TRUE ORDER BY orden,nombre`),
       prisma.$queryRawUnsafe(`SELECT id,nombre FROM "tbl_criterios_padre" WHERE activo=TRUE ORDER BY orden,nombre`),
