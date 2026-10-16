@@ -22,6 +22,7 @@ router.patch('/bloques/:id/desactivar', ...administradores, ctrl.desactivarBloqu
 router.get('/asignaciones', ...administradores, ctrl.listarAsignaciones);
 router.get('/:id/carga-horaria', ...administradores, ctrl.obtenerCargaHoraria);
 router.put('/asignaciones/:id/carga-horaria', ...administradores, ctrl.actualizarCargaHoraria);
+router.put('/denominaciones-curso/:idCurso', ...administradores, ctrl.guardarDenominacionCursoAnio);
 router.get('/disponibilidad/docentes', ...administradores, ctrl.listarDocentesDisponibilidad);
 router.get('/disponibilidad', ...administradores, ctrl.obtenerDisponibilidad);
 router.put('/disponibilidad', ...administradores, ctrl.guardarDisponibilidad);

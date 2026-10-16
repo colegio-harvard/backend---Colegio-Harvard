@@ -53,4 +53,11 @@ describe('Fase 10.7: denominaciones anuales de cursos', () => {
   test('la migración es solo estructural y no altera cursos, asignaciones ni períodos', () => {
     expect(migration).not.toMatch(/INSERT INTO|UPDATE|DELETE FROM|ALTER TABLE/);
   });
+
+  test('la operación administrativa conserva el catálogo e inserta o actualiza solo la denominación anual', () => {
+    expect(horarios).toContain('exports.guardarDenominacionCursoAnio');
+    expect(horarios).toContain('INSERT INTO "tbl_denominaciones_curso_anio"');
+    expect(horarios).toContain('ON CONFLICT (id_anio_escolar,id_curso) DO UPDATE');
+    expect(horarios).not.toContain('UPDATE "tbl_cursos_academicos" SET nombre');
+  });
 });

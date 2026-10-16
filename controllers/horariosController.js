@@ -229,6 +229,28 @@ exports.desactivarBloque = async (req, res) => {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo desactivar el bloque horario' }); }
 };
 
+// Configuración anual y reversible de la denominación visible de un curso.
+// El catálogo, las asignaciones y las notas conservan siempre sus IDs originales.
+exports.guardarDenominacionCursoAnio = async (req, res) => {
+  try {
+    const idAnio = entero(req.body.id_anio_escolar);
+    const idCurso = entero(req.params.idCurso);
+    const nombre = texto(req.body.nombre_presentacion, 150);
+    if (!idAnio || !idCurso || !nombre) return res.status(400).json({ error: 'Año escolar, curso y nombre de presentación son obligatorios.' });
+    const [anio, curso] = await Promise.all([
+      prisma.$queryRawUnsafe('SELECT id FROM "tbl_anios_escolares" WHERE id=$1', idAnio),
+      prisma.$queryRawUnsafe('SELECT id FROM "tbl_cursos_academicos" WHERE id=$1', idCurso),
+    ]);
+    if (!anio[0] || !curso[0]) return res.status(404).json({ error: 'Año escolar o curso no encontrado.' });
+    const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_denominaciones_curso_anio" (id_anio_escolar,id_curso,nombre_presentacion,creado_por)
+      VALUES ($1,$2,$3,$4)
+      ON CONFLICT (id_anio_escolar,id_curso) DO UPDATE SET nombre_presentacion=EXCLUDED.nombre_presentacion,actualizado_por=$4,actualizado_en=NOW()
+      RETURNING *`, idAnio, idCurso, nombre, req.user.id);
+    await registrarAuditoria({ userId: req.user.id, accion: 'GUARDAR_DENOMINACION_CURSO_ANIO', tipoEntidad: 'tbl_denominaciones_curso_anio', idEntidad: rows[0].id, resumen: `Curso ${idCurso}, año ${idAnio}: ${nombre}`, req });
+    res.json({ data: rows[0] });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo guardar la denominación anual del curso.' }); }
+};
+
 // Selector administrativo: evita exponer IDs sin contexto y limita las opciones
 // al aula y año que el editor ya seleccionó.
 exports.listarAsignaciones = async (req, res) => {
