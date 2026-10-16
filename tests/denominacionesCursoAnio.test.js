@@ -45,6 +45,11 @@ describe('Fase 10.7: denominaciones anuales de cursos', () => {
     expect(horarios).toContain('dca.id_anio_escolar=h.id_anio_escolar AND dca.id_curso=aa.id_curso');
   });
 
+  test('la carga horaria agrupa la denominación anual sin romper el fallback del catálogo', () => {
+    expect(horarios).toContain('COALESCE(dca.nombre_presentacion,c.nombre) curso');
+    expect(horarios).toContain('GROUP BY aa.id,aa.horas_semanales,c.nombre,dca.nombre_presentacion,u.nombres');
+  });
+
   test('la migración es solo estructural y no altera cursos, asignaciones ni períodos', () => {
     expect(migration).not.toMatch(/INSERT INTO|UPDATE|DELETE FROM|ALTER TABLE/);
   });

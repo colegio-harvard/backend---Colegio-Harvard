@@ -109,7 +109,7 @@ async function calcularCargaHoraria(db, horario) {
     LEFT JOIN "tbl_horario_detalles" d ON d.id_asignacion_academica=aa.id AND d.id_horario_escolar=$1
     LEFT JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario
     WHERE aa.id_anio_escolar=$2 AND aa.id_aula=$3 AND aa.activo=TRUE
-    GROUP BY aa.id,aa.horas_semanales,c.nombre,u.nombres ORDER BY c.nombre,u.nombres`, horario.id, horario.id_anio_escolar, horario.id_aula);
+    GROUP BY aa.id,aa.horas_semanales,c.nombre,dca.nombre_presentacion,u.nombres ORDER BY c.nombre,u.nombres`, horario.id, horario.id_anio_escolar, horario.id_aula);
   return rows.map(x => {
     const requeridas = x.horas_semanales === null ? null : Number(x.horas_semanales); const asignadas = Number(x.asignadas || 0);
     const diferencia = requeridas === null ? null : requeridas - asignadas;
