@@ -24,6 +24,12 @@ describe('Fase 6: disponibilidad docente', () => {
     expect(controlador).toContain("u.estado='ACTIVO' AND (r.codigo='DOCENTE' OR p.codigo='ACADEMICO_DOCENTE')");
   });
 
+  test('resuelve los niveles desde las asignaciones activas del docente y año', () => {
+    expect(rutas).toContain("'/disponibilidad/docentes/niveles'");
+    expect(controlador).toContain('exports.listarNivelesDocenteDisponibilidad');
+    expect(controlador).toContain('aa.id_docente=$1 AND aa.id_anio_escolar=$2 AND aa.activo=TRUE');
+  });
+
   test('bloquea como conflicto crítico la asignación en una restricción docente', () => {
     expect(controlador).toContain("codigo: 'DOCENTE_NO_DISPONIBLE'");
     expect(controlador).toContain('no está disponible');

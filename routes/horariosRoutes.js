@@ -24,6 +24,7 @@ router.get('/:id/carga-horaria', ...administradores, ctrl.obtenerCargaHoraria);
 router.put('/asignaciones/:id/carga-horaria', ...administradores, ctrl.actualizarCargaHoraria);
 router.put('/denominaciones-curso/:idCurso', ...administradores, ctrl.guardarDenominacionCursoAnio);
 router.get('/disponibilidad/docentes', ...administradores, ctrl.listarDocentesDisponibilidad);
+router.get('/disponibilidad/docentes/niveles', ...administradores, ctrl.listarNivelesDocenteDisponibilidad);
 router.get('/disponibilidad', ...administradores, ctrl.obtenerDisponibilidad);
 router.put('/disponibilidad', ...administradores, ctrl.guardarDisponibilidad);
 router.delete('/disponibilidad', ...administradores, ctrl.restaurarDisponibilidad);

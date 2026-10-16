@@ -301,6 +301,21 @@ exports.listarDocentesDisponibilidad = async (req, res) => {
   catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron listar docentes' }); }
 };
 
+exports.listarNivelesDocenteDisponibilidad = async (req, res) => {
+  try {
+    const docente = entero(req.query.id_docente); const anio = entero(req.query.id_anio_escolar);
+    if (!docente || !anio) return res.status(400).json({ error: 'Docente y año escolar son obligatorios' });
+    const data = await prisma.$queryRawUnsafe(`SELECT DISTINCT n.id,n.nombre
+      FROM "tbl_asignaciones_academicas" aa
+      JOIN "tbl_aulas" a ON a.id=aa.id_aula
+      JOIN "tbl_grados" g ON g.id=a.id_grado
+      JOIN "tbl_niveles" n ON n.id=g.id_nivel
+      WHERE aa.id_docente=$1 AND aa.id_anio_escolar=$2 AND aa.activo=TRUE
+      ORDER BY n.nombre`, docente, anio);
+    res.json({ data });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron obtener los niveles del docente' }); }
+};
+
 exports.obtenerDisponibilidad = async (req, res) => {
   try { const docente=entero(req.query.id_docente), anio=entero(req.query.id_anio_escolar); if(!docente||!anio) return res.status(400).json({error:'Docente y año escolar son obligatorios'}); const data=await prisma.$queryRawUnsafe('SELECT * FROM "tbl_disponibilidad_docente" WHERE id_docente=$1 AND id_anio_escolar=$2 ORDER BY dia_semana,id_bloque_horario',docente,anio); res.json({data}); }
   catch(error){console.error(error);res.status(500).json({error:'No se pudo obtener disponibilidad'});}
