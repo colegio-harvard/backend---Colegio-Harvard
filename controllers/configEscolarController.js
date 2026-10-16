@@ -295,11 +295,17 @@ const obtenerColegio = async (req, res) => {
 };
 
 const actualizarColegio = async (req, res) => {
-  const { telefono_whatsapp, lema, descripcion, direccion, email, telefono, portada_imagen_url } = req.body;
+  const { nombre, telefono_whatsapp, lema, descripcion, direccion, email, telefono, portada_imagen_url } = req.body;
   try {
     const colegio = await prisma.tbl_colegio.findFirst();
     if (!colegio) return res.status(404).json({ error: 'Colegio no configurado' });
+
+    if (nombre !== undefined && (typeof nombre !== 'string' || !nombre.trim() || nombre.trim().length > 200)) {
+      return res.status(400).json({ error: 'El nombre del colegio debe ser un texto entre 1 y 200 caracteres' });
+    }
+
     const data = { user_id_modification: req.user.id, date_time_modification: new Date() };
+    if (nombre !== undefined) data.nombre = nombre.trim();
     if (telefono_whatsapp !== undefined) data.telefono_whatsapp = telefono_whatsapp ? telefono_whatsapp.replace(/\D/g, '') : telefono_whatsapp;
     if (lema !== undefined) data.lema = lema;
     if (descripcion !== undefined) data.descripcion = descripcion;
