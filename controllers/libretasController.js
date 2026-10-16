@@ -4,6 +4,12 @@ const { notaValida, notaNumericaValida, letraDesdeNumero } = require('../service
 
 const esSuper = req => req.user.rol_codigo === 'SUPER_ADMIN';
 const FRASE_INSTITUCIONAL_DEFAULT = '24 años formando generaciones, más de 2800 estudiantes y miles de historias que nos inspiran a seguir creciendo juntos.';
+const colorHorario = valor => {
+  if (valor === undefined) return undefined;
+  const color = String(valor || '').trim();
+  if (!color) return null;
+  return /^#[0-9A-F]{6}$/i.test(color) ? color.toUpperCase() : false;
+};
 
 const anioActivo = () => prisma.tbl_anios_escolares.findFirst({ where: { activo: true } });
 
@@ -144,15 +150,17 @@ const crearCurso = async (req, res) => {
     const nombre = String(req.body.nombre || '').trim();
     const nivel = String(req.body.nivel || 'INICIAL').toUpperCase();
     const idArea = Number(req.body.id_area);
+    const color = colorHorario(req.body.color_horario);
     if (!nombre || !idArea) return res.status(400).json({ error: 'Área y curso son obligatorios' });
+    if (color === false) return res.status(400).json({ error: 'El color de horario debe tener formato HEX, por ejemplo #2563EB.' });
     const repetido = await prisma.$queryRawUnsafe(`SELECT id,activo FROM "tbl_cursos_academicos" WHERE id_area=$1 AND LOWER(TRIM(nombre))=LOWER(TRIM($2)) AND nivel=$3 LIMIT 1`, idArea, nombre, nivel);
     if (repetido[0]?.activo) return res.status(409).json({ error: 'Este curso ya existe dentro del área seleccionada' });
     if (repetido[0]) {
-      const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_cursos_academicos" SET nombre=$1,activo=TRUE,orden=$2 WHERE id=$3 RETURNING *`, nombre, Number(req.body.orden || 0), repetido[0].id);
+      const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_cursos_academicos" SET nombre=$1,activo=TRUE,orden=$2,color_horario=CASE WHEN $3 THEN $4 ELSE color_horario END WHERE id=$5 RETURNING *`, nombre, Number(req.body.orden || 0), color !== undefined, color, repetido[0].id);
       return res.json({ data: rows[0] });
     }
-    const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_cursos_academicos" (id_area,nombre,nivel,orden,creado_por)
-      VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id_area,nombre,nivel) DO UPDATE SET activo=TRUE,orden=EXCLUDED.orden RETURNING *`, idArea, nombre, nivel, Number(req.body.orden || 0), req.user.id);
+    const rows = await prisma.$queryRawUnsafe(`INSERT INTO "tbl_cursos_academicos" (id_area,nombre,nivel,orden,color_horario,creado_por)
+      VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id_area,nombre,nivel) DO UPDATE SET activo=TRUE,orden=EXCLUDED.orden,color_horario=COALESCE(EXCLUDED.color_horario,"tbl_cursos_academicos".color_horario) RETURNING *`, idArea, nombre, nivel, Number(req.body.orden || 0), color || null, req.user.id);
     res.status(201).json({ data: rows[0] });
   } catch { res.status(500).json({ error: 'No se pudo guardar el curso' }); }
 };
@@ -183,11 +191,12 @@ const eliminarArea = async (req, res) => {
 
 const actualizarCurso = async (req, res) => {
   try {
-    const id = Number(req.params.id), nombre = String(req.body.nombre || '').trim(), idArea = Number(req.body.id_area);
+    const id = Number(req.params.id), nombre = String(req.body.nombre || '').trim(), idArea = Number(req.body.id_area), color = colorHorario(req.body.color_horario);
     if (!id || !nombre || !idArea) return res.status(400).json({ error: 'Área y curso son obligatorios' });
+    if (color === false) return res.status(400).json({ error: 'El color de horario debe tener formato HEX, por ejemplo #2563EB.' });
     const repetido = await prisma.$queryRawUnsafe(`SELECT id FROM "tbl_cursos_academicos" WHERE id<>$1 AND id_area=$2 AND activo=TRUE AND LOWER(TRIM(nombre))=LOWER(TRIM($3)) LIMIT 1`, id, idArea, nombre);
     if (repetido[0]) return res.status(409).json({ error: 'Ya existe otro curso con ese nombre dentro del área' });
-    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_cursos_academicos" SET nombre=$1,id_area=$2,orden=$3 WHERE id=$4 RETURNING *`, nombre, idArea, Number(req.body.orden || 0), id);
+    const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_cursos_academicos" SET nombre=$1,id_area=$2,orden=$3,color_horario=CASE WHEN $4 THEN $5 ELSE color_horario END WHERE id=$6 RETURNING *`, nombre, idArea, Number(req.body.orden || 0), color !== undefined, color, id);
     if (!rows[0]) return res.status(404).json({ error: 'Curso no encontrado' });
     res.json({ data: rows[0] });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo editar el curso' }); }
