@@ -41,12 +41,12 @@ describe('Fase 9: espacios físicos', () => {
   });
 
   test('rechaza un espacio inexistente o inactivo en nuevas asignaciones', () => {
-    expect(controlador).toContain("codigo:'ESPACIO_INEXISTENTE'");
-    expect(controlador).toContain("codigo:'ESPACIO_INACTIVO'");
+    expect(controlador).toContain("codigo: 'ESPACIO_INEXISTENTE'");
+    expect(controlador).toContain("codigo: 'ESPACIO_INACTIVO'");
   });
 
   test('rechaza dos clases simultáneas en el mismo espacio', () => {
-    expect(controlador).toContain("codigo:'CONFLICTO_ESPACIO_FISICO'");
+    expect(controlador).toContain("codigo: 'CONFLICTO_ESPACIO_FISICO'");
     expect(controlador).toContain('d.id_espacio_fisico=$2');
     expect(controlador).toContain('d.dia_semana=$3 AND d.id_bloque_horario=$4');
   });
