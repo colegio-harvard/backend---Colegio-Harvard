@@ -194,10 +194,14 @@ const actualizarCurso = async (req, res) => {
     const id = Number(req.params.id), nombre = String(req.body.nombre || '').trim(), idArea = Number(req.body.id_area), color = colorHorario(req.body.color_horario);
     if (!id || !nombre || !idArea) return res.status(400).json({ error: 'Área y curso son obligatorios' });
     if (color === false) return res.status(400).json({ error: 'El color de horario debe tener formato HEX, por ejemplo #2563EB.' });
-    const repetido = await prisma.$queryRawUnsafe(`SELECT id FROM "tbl_cursos_academicos" WHERE id<>$1 AND id_area=$2 AND activo=TRUE AND LOWER(TRIM(nombre))=LOWER(TRIM($3)) LIMIT 1`, id, idArea, nombre);
-    if (repetido[0]) return res.status(409).json({ error: 'Ya existe otro curso con ese nombre dentro del área' });
+    const actual = await prisma.$queryRawUnsafe(`SELECT id,nombre,id_area FROM "tbl_cursos_academicos" WHERE id=$1 LIMIT 1`, id);
+    if (!actual[0]) return res.status(404).json({ error: 'Curso no encontrado' });
+    const cambiaIdentidad = actual[0].id_area !== idArea || String(actual[0].nombre).trim().toLowerCase() !== nombre.toLowerCase();
+    if (cambiaIdentidad) {
+      const repetido = await prisma.$queryRawUnsafe(`SELECT id FROM "tbl_cursos_academicos" WHERE id<>$1 AND id_area=$2 AND activo=TRUE AND LOWER(TRIM(nombre))=LOWER(TRIM($3)) LIMIT 1`, id, idArea, nombre);
+      if (repetido[0]) return res.status(409).json({ error: 'Ya existe otro curso con ese nombre dentro del área' });
+    }
     const rows = await prisma.$queryRawUnsafe(`UPDATE "tbl_cursos_academicos" SET nombre=$1,id_area=$2,orden=$3,color_horario=CASE WHEN $4 THEN $5 ELSE color_horario END WHERE id=$6 RETURNING *`, nombre, idArea, Number(req.body.orden || 0), color !== undefined, color, id);
-    if (!rows[0]) return res.status(404).json({ error: 'Curso no encontrado' });
     res.json({ data: rows[0] });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo editar el curso' }); }
 };

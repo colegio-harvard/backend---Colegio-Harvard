@@ -33,6 +33,11 @@ describe('Fase 10.9: colores de horario por curso', () => {
     expect(libretas).toContain('color_horario=CASE WHEN $4 THEN $5 ELSE color_horario END');
   });
 
+  test('permite cambiar solo el color aunque existan cursos históricos homónimos', () => {
+    expect(libretas).toContain('const cambiaIdentidad');
+    expect(libretas).toContain('if (cambiaIdentidad)');
+  });
+
   test('la migración no toca notas, asignaciones, periodos ni libretas', () => {
     expect(migration).not.toMatch(/tbl_notas|tbl_asignaciones|tbl_periodos|tbl_libretas/);
   });
