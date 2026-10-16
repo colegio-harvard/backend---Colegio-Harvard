@@ -30,6 +30,12 @@ describe('Fase 6: disponibilidad docente', () => {
     expect(controlador).toContain('aa.id_docente=$1 AND aa.id_anio_escolar=$2 AND aa.activo=TRUE');
   });
 
+  test('devuelve ocupaciones únicamente desde clases publicadas del docente seleccionado', () => {
+    expect(controlador).toContain('const [data, ocupaciones] = await Promise.all');
+    expect(controlador).toContain("aa.id_docente=$1 AND h.id_anio_escolar=$2 AND h.estado='PUBLICADO'");
+    expect(controlador).toContain('res.json({data,ocupaciones})');
+  });
+
   test('bloquea como conflicto crítico la asignación en una restricción docente', () => {
     expect(controlador).toContain("codigo: 'DOCENTE_NO_DISPONIBLE'");
     expect(controlador).toContain('no está disponible');

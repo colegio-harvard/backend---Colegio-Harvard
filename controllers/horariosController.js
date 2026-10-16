@@ -317,7 +317,24 @@ exports.listarNivelesDocenteDisponibilidad = async (req, res) => {
 };
 
 exports.obtenerDisponibilidad = async (req, res) => {
-  try { const docente=entero(req.query.id_docente), anio=entero(req.query.id_anio_escolar); if(!docente||!anio) return res.status(400).json({error:'Docente y año escolar son obligatorios'}); const data=await prisma.$queryRawUnsafe('SELECT * FROM "tbl_disponibilidad_docente" WHERE id_docente=$1 AND id_anio_escolar=$2 ORDER BY dia_semana,id_bloque_horario',docente,anio); res.json({data}); }
+  try {
+    const docente=entero(req.query.id_docente), anio=entero(req.query.id_anio_escolar);
+    if(!docente||!anio) return res.status(400).json({error:'Docente y año escolar son obligatorios'});
+    const [data, ocupaciones] = await Promise.all([
+      prisma.$queryRawUnsafe('SELECT * FROM "tbl_disponibilidad_docente" WHERE id_docente=$1 AND id_anio_escolar=$2 ORDER BY dia_semana,id_bloque_horario',docente,anio),
+      prisma.$queryRawUnsafe(`SELECT d.id_bloque_horario,d.dia_semana,COALESCE(dca.nombre_presentacion,c.nombre) curso,g.nombre grado,a.seccion
+        FROM "tbl_horario_detalles" d
+        JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar
+        JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica
+        JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
+        JOIN "tbl_aulas" a ON a.id=h.id_aula
+        JOIN "tbl_grados" g ON g.id=a.id_grado
+        LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=h.id_anio_escolar AND dca.id_curso=aa.id_curso
+        WHERE aa.id_docente=$1 AND h.id_anio_escolar=$2 AND h.estado='PUBLICADO'
+        ORDER BY d.dia_semana,d.id_bloque_horario`,docente,anio),
+    ]);
+    res.json({data,ocupaciones});
+  }
   catch(error){console.error(error);res.status(500).json({error:'No se pudo obtener disponibilidad'});}
 };
 
