@@ -163,7 +163,25 @@ async function proponerDetalles(db, contexto, horario) {
 }
 
 exports.analizarGeneracion = async (req, res) => {
-  try { const idAnio = entero(req.body.id_anio_escolar), idAula = entero(req.body.id_aula); if (!idAnio || !idAula) return res.status(400).json({ error: 'Año escolar y sección son obligatorios.' }); const contexto = await contextoGeneracion(prisma, idAnio, idAula); if (contexto.errores.length) return res.json({ posible: false, errores: contexto.errores, bloquesDisponibles: contexto.disponibles || 0, bloquesRequeridos: contexto.requeridos || 0 }); const propuesta = await proponerDetalles(prisma, contexto, { id: -1, id_anio_escolar: idAnio, id_aula: idAula, id_nivel: contexto.aula.id_nivel }); res.json({ posible: !propuesta.error, errores: propuesta.error ? [propuesta.error] : [], bloquesDisponibles: contexto.disponibles, bloquesRequeridos: contexto.requeridos, asignaciones: contexto.asignaciones.length, restriccionesRespetadas: true }); }
+  try {
+    const idAnio = entero(req.body.id_anio_escolar), idAula = entero(req.body.id_aula);
+    if (!idAnio || !idAula) return res.status(400).json({ error: 'Año escolar y sección son obligatorios.' });
+    const contexto = await contextoGeneracion(prisma, idAnio, idAula);
+    const restricciones = await prisma.$queryRawUnsafe(`SELECT COUNT(*)::int total FROM "tbl_disponibilidad_docente" d
+      WHERE d.id_anio_escolar=$1 AND d.disponible=FALSE AND d.id_docente IN (
+        SELECT DISTINCT id_docente FROM "tbl_asignaciones_academicas" WHERE id_anio_escolar=$1 AND id_aula=$2 AND activo=TRUE
+      )`, idAnio, idAula);
+    const resumen = {
+      asignaciones: contexto.asignaciones?.length || 0,
+      cargasConfiguradas: contexto.asignaciones?.filter(item => Number(item.horas_semanales) > 0).length || 0,
+      docentesInvolucrados: new Set((contexto.asignaciones || []).map(item => item.id_docente)).size,
+      restriccionesDisponibilidad: Number(restricciones[0]?.total || 0),
+      espaciosFisicos: 'La propuesta no asigna espacios automáticamente.',
+    };
+    if (contexto.errores.length) return res.json({ posible: false, errores: contexto.errores, bloquesDisponibles: contexto.disponibles || 0, bloquesRequeridos: contexto.requeridos || 0, ...resumen });
+    const propuesta = await proponerDetalles(prisma, contexto, { id: -1, id_anio_escolar: idAnio, id_aula: idAula, id_nivel: contexto.aula.id_nivel });
+    res.json({ posible: !propuesta.error, errores: propuesta.error ? [propuesta.error] : [], bloquesDisponibles: contexto.disponibles, bloquesRequeridos: contexto.requeridos, restriccionesRespetadas: true, ...resumen });
+  }
   catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo analizar la generación.' }); }
 };
 

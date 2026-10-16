@@ -9,4 +9,5 @@ describe('Fase 7: generación asistida', () => {
   test('usa transacción y valida después de insertar la propuesta', () => { expect(fuente).toContain('prisma.$transaction'); expect(fuente).toContain('diagnosticarHorario(tx'); expect(fuente).toContain('GENERACION_INVALIDA'); });
   test('considera recreos, disponibilidad y conflictos mediante validarDetalle', () => { expect(fuente).toContain("tipo='CLASE'"); expect(fuente).toContain('validarDetalle(db'); expect(fuente).toContain('docentesOcupados'); });
   test('devuelve diagnóstico sin crear horarios cuando faltan precondiciones', () => { expect(fuente).toContain('GENERACION_NO_POSIBLE'); expect(fuente).toContain('carga semanal sin configurar'); });
+  test('expone métricas de preparación sin cambiar el algoritmo de generación', () => { expect(fuente).toContain('cargasConfiguradas'); expect(fuente).toContain('docentesInvolucrados'); expect(fuente).toContain('restriccionesDisponibilidad'); expect(fuente).toContain("La propuesta no asigna espacios automáticamente."); });
 });
