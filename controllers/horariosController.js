@@ -231,9 +231,10 @@ exports.obtenerOcupacionEspacio = async (req, res) => {
        ORDER BY b.hora_inicio,b.hora_fin,n.nombre,b.orden`,
       ...parametros,
     );
-    const ocupaciones = await prisma.$queryRawUnsafe(
+    const ocupacionesClase = await prisma.$queryRawUnsafe(
       `SELECT d.id,d.dia_semana,d.id_bloque_horario,b.id_nivel,n.nombre nivel,b.orden,b.nombre bloque,b.hora_inicio,b.hora_fin,b.tipo,
-              a.id id_aula,a.seccion,g.nombre grado,COALESCE(dca.nombre_presentacion,c.nombre) curso,c.color_horario,u.nombres docente
+              a.id id_aula,a.seccion,g.nombre grado,COALESCE(dca.nombre_presentacion,c.nombre) curso,c.color_horario,u.nombres docente,
+              NULL::text descripcion,FALSE uso_institucional
        FROM "tbl_horario_detalles" d
        JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar
        JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario
@@ -248,6 +249,21 @@ exports.obtenerOcupacionEspacio = async (req, res) => {
        ORDER BY b.hora_inicio,d.dia_semana,g.nombre,a.seccion,c.nombre`,
       ...(idNivel ? [anio.id, idEspacio, idNivel] : [anio.id, idEspacio]),
     );
+    const usosInstitucionales = await prisma.$queryRawUnsafe(
+      `SELECT ui.id,ui.dia_semana,ui.id_bloque_horario,b.id_nivel,n.nombre nivel,b.orden,b.nombre bloque,b.hora_inicio,b.hora_fin,b.tipo,
+              a.id id_aula,a.seccion,g.nombre grado,NULL::text curso,NULL::text color_horario,NULL::text docente,
+              ui.descripcion,TRUE uso_institucional
+       FROM "tbl_horario_usos_institucionales_espacios" ui
+       JOIN "tbl_horarios_escolares" h ON h.id=ui.id_horario_escolar
+       JOIN "tbl_bloques_horarios" b ON b.id=ui.id_bloque_horario
+       JOIN "tbl_aulas" a ON a.id=h.id_aula
+       JOIN "tbl_grados" g ON g.id=a.id_grado
+       JOIN "tbl_niveles" n ON n.id=g.id_nivel
+       WHERE h.id_anio_escolar=$1 AND ui.id_espacio_fisico=$2 AND h.estado='PUBLICADO'${idNivel ? ' AND g.id_nivel=$3' : ''}
+       ORDER BY b.hora_inicio,ui.dia_semana,g.nombre,a.seccion,ui.descripcion`,
+      ...(idNivel ? [anio.id, idEspacio, idNivel] : [anio.id, idEspacio]),
+    );
+    const ocupaciones = [...ocupacionesClase, ...usosInstitucionales];
     res.json({ data: { espacio, anio, bloques, ocupaciones } });
   } catch (error) {
     console.error(error);

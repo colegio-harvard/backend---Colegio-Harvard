@@ -22,4 +22,9 @@ describe('ocupación publicada de espacios físicos', () => {
       expect(controlador).toContain(campo);
     });
   });
+
+  test('incluye los usos institucionales sin convertirlos en clases académicas', () => {
+    expect(controlador).toContain('tbl_horario_usos_institucionales_espacios');
+    expect(controlador).toContain('uso_institucional');
+  });
 });
