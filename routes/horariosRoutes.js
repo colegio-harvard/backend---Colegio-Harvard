@@ -11,6 +11,7 @@ const administradores = [verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN')];
 router.get('/padre/mis-horarios', verificarToken, verificarRol('PADRE'), ctrl.misHorariosPadre);
 router.get('/docente/mi-horario', verificarToken, verificarRolOCapacidad(['DOCENTE'], [CAPACIDAD_ACADEMICO_DOCENTE]), ctrl.miHorarioDocente);
 router.get('/espacios', ...administradores, ctrl.listarEspacios);
+router.get('/espacios/:id/ocupacion', ...administradores, ctrl.obtenerOcupacionEspacio);
 router.post('/espacios', ...administradores, ctrl.crearEspacio);
 router.put('/espacios/:id', ...administradores, ctrl.actualizarEspacio);
 router.patch('/espacios/:id/activo', ...administradores, ctrl.cambiarEstadoEspacio);

@@ -205,6 +205,55 @@ exports.listarEspacios = async (req,res)=>{try{const data=await prisma.$queryRaw
 exports.crearEspacio = async (req,res)=>{try{const nombre=texto(req.body.nombre,150),capacidadSimultanea=entero(req.body.capacidad_simultanea ?? 1);if(!nombre)return res.status(400).json({error:'Nombre obligatorio'});if(!capacidadSimultanea)return res.status(400).json({error:'La capacidad simultánea debe ser un entero mayor o igual a 1'});const r=await prisma.$queryRawUnsafe('INSERT INTO "tbl_espacios_fisicos" (nombre,tipo,capacidad,capacidad_simultanea,ubicacion,observacion,creado_por) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',nombre,texto(req.body.tipo,30)||'OTRO',entero(req.body.capacidad)||null,capacidadSimultanea,texto(req.body.ubicacion,150)||null,texto(req.body.observacion)||null,req.user.id);await registrarAuditoria({userId:req.user.id,accion:'CREAR_ESPACIO_FISICO',tipoEntidad:'tbl_espacios_fisicos',idEntidad:r[0].id,resumen:nombre,req});res.status(201).json({data:r[0]});}catch(e){res.status(e.code==='23505'?409:500).json({error:'No se pudo crear espacio'});}};
 exports.actualizarEspacio = async (req,res)=>{try{const id=entero(req.params.id),nombre=texto(req.body.nombre,150),capacidadSimultanea=req.body.capacidad_simultanea===undefined?null:entero(req.body.capacidad_simultanea);if(req.body.capacidad_simultanea!==undefined&&!capacidadSimultanea)return res.status(400).json({error:'La capacidad simultánea debe ser un entero mayor o igual a 1'});const r=await prisma.$queryRawUnsafe('UPDATE "tbl_espacios_fisicos" SET nombre=$1,tipo=$2,capacidad=$3,capacidad_simultanea=COALESCE($4,capacidad_simultanea),ubicacion=$5,observacion=$6,actualizado_por=$7,actualizado_en=NOW() WHERE id=$8 RETURNING *',nombre,texto(req.body.tipo,30)||'OTRO',entero(req.body.capacidad)||null,capacidadSimultanea,texto(req.body.ubicacion,150)||null,texto(req.body.observacion)||null,req.user.id,id);if(!r[0])return res.status(404).json({error:'Espacio no encontrado'});await registrarAuditoria({userId:req.user.id,accion:'EDITAR_ESPACIO_FISICO',tipoEntidad:'tbl_espacios_fisicos',idEntidad:id,resumen:nombre,req});res.json({data:r[0]});}catch(e){res.status(500).json({error:'No se pudo editar espacio'});}};
 exports.cambiarEstadoEspacio = async (req,res)=>{try{const id=entero(req.params.id),activo=!!req.body.activo;const r=await prisma.$queryRawUnsafe('UPDATE "tbl_espacios_fisicos" SET activo=$1,actualizado_por=$2,actualizado_en=NOW() WHERE id=$3 RETURNING *',activo,req.user.id,id);if(!r[0])return res.status(404).json({error:'Espacio no encontrado'});await registrarAuditoria({userId:req.user.id,accion:activo?'ACTIVAR_ESPACIO_FISICO':'DESACTIVAR_ESPACIO_FISICO',tipoEntidad:'tbl_espacios_fisicos',idEntidad:id,resumen:r[0].nombre,req});res.json({data:r[0]});}catch(e){res.status(500).json({error:'No se pudo actualizar espacio'});}};
+
+exports.obtenerOcupacionEspacio = async (req, res) => {
+  try {
+    const idEspacio = entero(req.params.id);
+    const idAnio = entero(req.query.id_anio_escolar);
+    const idNivel = entero(req.query.id_nivel);
+    if (!idEspacio) return res.status(400).json({ error: 'Espacio físico inválido' });
+
+    const espacio = (await prisma.$queryRawUnsafe('SELECT id,nombre,tipo,capacidad_simultanea,activo FROM "tbl_espacios_fisicos" WHERE id=$1', idEspacio))[0];
+    if (!espacio) return res.status(404).json({ error: 'Espacio físico no encontrado' });
+
+    const anio = idAnio
+      ? (await prisma.$queryRawUnsafe('SELECT id,anio,activo FROM "tbl_anios_escolares" WHERE id=$1', idAnio))[0]
+      : (await prisma.$queryRawUnsafe('SELECT id,anio,activo FROM "tbl_anios_escolares" WHERE activo=TRUE ORDER BY anio DESC LIMIT 1'))[0];
+    if (!anio) return res.status(404).json({ error: 'No existe un año escolar activo' });
+
+    const filtrosNivel = idNivel ? ' AND g.id_nivel=$2' : '';
+    const parametros = idNivel ? [anio.id, idNivel] : [anio.id];
+    const bloques = await prisma.$queryRawUnsafe(
+      `SELECT b.id,b.id_nivel,n.nombre nivel,b.orden,b.nombre,b.hora_inicio,b.hora_fin,b.tipo
+       FROM "tbl_bloques_horarios" b
+       JOIN "tbl_niveles" n ON n.id=b.id_nivel
+       WHERE b.id_anio_escolar=$1 AND b.activo=TRUE${filtrosNivel}
+       ORDER BY b.hora_inicio,b.hora_fin,n.nombre,b.orden`,
+      ...parametros,
+    );
+    const ocupaciones = await prisma.$queryRawUnsafe(
+      `SELECT d.id,d.dia_semana,d.id_bloque_horario,b.id_nivel,n.nombre nivel,b.orden,b.nombre bloque,b.hora_inicio,b.hora_fin,b.tipo,
+              a.id id_aula,a.seccion,g.nombre grado,COALESCE(dca.nombre_presentacion,c.nombre) curso,c.color_horario,u.nombres docente
+       FROM "tbl_horario_detalles" d
+       JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar
+       JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario
+       JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica
+       JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso
+       JOIN "tbl_usuarios" u ON u.id=aa.id_docente
+       JOIN "tbl_aulas" a ON a.id=h.id_aula
+       JOIN "tbl_grados" g ON g.id=a.id_grado
+       JOIN "tbl_niveles" n ON n.id=g.id_nivel
+       LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=h.id_anio_escolar AND dca.id_curso=aa.id_curso
+       WHERE h.id_anio_escolar=$1 AND d.id_espacio_fisico=$2 AND h.estado='PUBLICADO'${idNivel ? ' AND g.id_nivel=$3' : ''}
+       ORDER BY b.hora_inicio,d.dia_semana,g.nombre,a.seccion,c.nombre`,
+      ...(idNivel ? [anio.id, idEspacio, idNivel] : [anio.id, idEspacio]),
+    );
+    res.json({ data: { espacio, anio, bloques, ocupaciones } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'No se pudo obtener la ocupación del espacio físico' });
+  }
+};
 exports.listarBloques = async (req, res) => {
   try {
     const where = []; const params = [];
