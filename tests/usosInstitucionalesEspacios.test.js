@@ -5,6 +5,10 @@ const migration = fs.readFileSync(
   path.join(__dirname, '..', 'prisma', 'migrations', '20261017000400_add_institutional_space_uses', 'migration.sql'),
   'utf8',
 );
+const controlador = fs.readFileSync(
+  path.join(__dirname, '..', 'controllers', 'horariosController.js'),
+  'utf8',
+);
 
 describe('usos institucionales de espacios', () => {
   test('crea una entidad separada de los detalles de clase', () => {
@@ -18,5 +22,16 @@ describe('usos institucionales de espacios', () => {
     expect(migration).toContain('bloque.id IN (1, 2)');
     expect(migration).toContain("('LUNES'), ('MARTES'), ('MIERCOLES'), ('JUEVES'), ('VIERNES')");
     expect(migration).toContain('"id_espacio_fisico", "descripcion", "creado_por")');
+  });
+
+  test('incluye los usos institucionales en el detalle administrativo y de padre', () => {
+    const inicioPadre = controlador.indexOf('exports.misHorariosPadre');
+    const finPadre = controlador.indexOf('exports.miHorarioDocente');
+    const padre = controlador.slice(inicioPadre, finPadre);
+
+    expect(controlador).toContain('exports.obtenerHorario');
+    expect(controlador).toContain('usos_institucionales: usosInstitucionales');
+    expect(controlador).toContain('ef.nombre espacio_fisico');
+    expect(padre).toContain('usos_institucionales: usosInstitucionales');
   });
 });

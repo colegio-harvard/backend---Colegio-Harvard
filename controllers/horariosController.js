@@ -456,11 +456,16 @@ exports.obtenerHorario = async (req, res) => {
   try {
     const horario = await obtenerCabecera(prisma, entero(req.params.id));
     if (!horario) return res.status(404).json({ error: 'Horario no encontrado' });
-    const [detalles, bloques] = await Promise.all([
+    const [detalles, bloques, usosInstitucionales] = await Promise.all([
       prisma.$queryRawUnsafe(`SELECT d.*,b.nombre bloque,b.orden,b.hora_inicio,b.hora_fin,b.tipo,aa.id_docente,u.nombres docente,COALESCE(dca.nombre_presentacion,c.nombre) curso,c.color_horario,ar.nombre area,ef.nombre espacio_fisico FROM "tbl_horario_detalles" d JOIN "tbl_bloques_horarios" b ON b.id=d.id_bloque_horario JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_usuarios" u ON u.id=aa.id_docente JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=$2 AND dca.id_curso=aa.id_curso LEFT JOIN "tbl_espacios_fisicos" ef ON ef.id=d.id_espacio_fisico WHERE d.id_horario_escolar=$1 ORDER BY d.dia_semana,b.orden`, horario.id, horario.id_anio_escolar),
       prisma.$queryRawUnsafe('SELECT * FROM "tbl_bloques_horarios" WHERE id_anio_escolar=$1 AND id_nivel=$2 ORDER BY orden', horario.id_anio_escolar, horario.id_nivel),
+      prisma.$queryRawUnsafe(`SELECT ui.id,ui.id_bloque_horario,ui.dia_semana,ui.descripcion,ef.nombre espacio_fisico
+        FROM "tbl_horario_usos_institucionales_espacios" ui
+        JOIN "tbl_espacios_fisicos" ef ON ef.id=ui.id_espacio_fisico
+        WHERE ui.id_horario_escolar=$1
+        ORDER BY ui.dia_semana,ui.id_bloque_horario`, horario.id),
     ]);
-    res.json({ data: { ...horario, detalles, bloques } });
+    res.json({ data: { ...horario, detalles, bloques, usos_institucionales: usosInstitucionales } });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo obtener el horario' }); }
 };
 
@@ -589,11 +594,16 @@ exports.misHorariosPadre = async (req, res) => {
     const data = await Promise.all(hijos.map(async hijo => {
       const horario = (await prisma.$queryRawUnsafe(`SELECT id,version,publicado_en FROM "tbl_horarios_escolares" WHERE id_anio_escolar=$1 AND id_aula=$2 AND estado='PUBLICADO'`, hijo.id_anio_escolar, hijo.id_aula))[0];
       if (!horario) return { alumno: { id: hijo.id_alumno, codigo: hijo.codigo_alumno, nombre: hijo.nombre_completo }, aula: { id: hijo.id_aula, seccion: hijo.seccion, grado: hijo.grado, nivel: hijo.nivel, anio: hijo.anio }, horarioPublicado: false, bloques: [], clases: [] };
-      const [bloques, clases] = await Promise.all([
+      const [bloques, clases, usosInstitucionales] = await Promise.all([
         prisma.$queryRawUnsafe('SELECT id,nombre,orden,hora_inicio,hora_fin,tipo FROM "tbl_bloques_horarios" WHERE id_anio_escolar=$1 AND id_nivel=$2 AND activo=TRUE ORDER BY orden', hijo.id_anio_escolar, hijo.id_nivel),
         prisma.$queryRawUnsafe(`SELECT d.id,d.dia_semana,d.id_bloque_horario,d.observacion,COALESCE(dca.nombre_presentacion,c.nombre) curso,c.color_horario,ar.nombre area,u.nombres docente,ef.nombre espacio_fisico FROM "tbl_horario_detalles" d JOIN "tbl_horarios_escolares" h ON h.id=d.id_horario_escolar JOIN "tbl_asignaciones_academicas" aa ON aa.id=d.id_asignacion_academica JOIN "tbl_cursos_academicos" c ON c.id=aa.id_curso JOIN "tbl_areas_academicas" ar ON ar.id=c.id_area JOIN "tbl_usuarios" u ON u.id=aa.id_docente LEFT JOIN "tbl_denominaciones_curso_anio" dca ON dca.id_anio_escolar=h.id_anio_escolar AND dca.id_curso=aa.id_curso LEFT JOIN "tbl_espacios_fisicos" ef ON ef.id=d.id_espacio_fisico WHERE d.id_horario_escolar=$1 ORDER BY d.dia_semana,d.id_bloque_horario`, horario.id),
+        prisma.$queryRawUnsafe(`SELECT ui.id,ui.id_bloque_horario,ui.dia_semana,ui.descripcion,ef.nombre espacio_fisico
+          FROM "tbl_horario_usos_institucionales_espacios" ui
+          JOIN "tbl_espacios_fisicos" ef ON ef.id=ui.id_espacio_fisico
+          WHERE ui.id_horario_escolar=$1
+          ORDER BY ui.dia_semana,ui.id_bloque_horario`, horario.id),
       ]);
-      return { alumno: { id: hijo.id_alumno, codigo: hijo.codigo_alumno, nombre: hijo.nombre_completo }, aula: { id: hijo.id_aula, seccion: hijo.seccion, grado: hijo.grado, nivel: hijo.nivel, anio: hijo.anio }, horarioPublicado: true, horario: { id: horario.id, version: horario.version, publicado_en: horario.publicado_en }, bloques, clases };
+      return { alumno: { id: hijo.id_alumno, codigo: hijo.codigo_alumno, nombre: hijo.nombre_completo }, aula: { id: hijo.id_aula, seccion: hijo.seccion, grado: hijo.grado, nivel: hijo.nivel, anio: hijo.anio }, horarioPublicado: true, horario: { id: horario.id, version: horario.version, publicado_en: horario.publicado_en }, bloques, clases, usos_institucionales: usosInstitucionales };
     }));
     res.json({ data });
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron obtener los horarios de sus hijos' }); }
