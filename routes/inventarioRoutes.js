@@ -8,6 +8,8 @@ router.get('/recibo/:codigo', ctrl.obtenerRecibo);
 router.use(verificarToken, verificarRol('SUPER_ADMIN', 'ADMIN'));
 router.get('/resumen', ctrl.resumen);
 router.get('/productos', ctrl.listarProductos);
+router.get('/reposicion', ctrl.planReposicion);
+router.put('/variantes/:id/meta-reposicion', ctrl.actualizarMetaReposicion);
 router.post('/productos', ctrl.crearProducto);
 router.put('/productos/:id', ctrl.actualizarProducto);
 router.patch('/productos/:id/archivar', ctrl.archivarProducto);

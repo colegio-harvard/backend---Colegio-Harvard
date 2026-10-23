@@ -85,6 +85,46 @@ exports.listarProductos = async (req, res) => {
   } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudieron cargar los productos' }); }
 };
 
+// La meta de reposición es una referencia de planificación. No altera el stock
+// ni crea movimientos, compras o ventas.
+exports.planReposicion = async (_req, res) => {
+  try {
+    const productos = await prisma.tbl_inventario_productos.findMany({
+      where: { activo: true },
+      include: { variantes: { where: { activo: true }, orderBy: { nombre: 'asc' } } },
+      orderBy: [{ categoria: 'asc' }, { nombre: 'asc' }],
+    });
+    const data = productos.flatMap(producto => producto.variantes.map(variante => ({
+      id_variante: variante.id,
+      producto: producto.nombre,
+      categoria: producto.categoria,
+      variante: variante.nombre,
+      sku: variante.sku,
+      stock_actual: variante.stock,
+      meta_reposicion: variante.meta_reposicion,
+      faltante: variante.meta_reposicion == null ? null : Math.max(0, variante.meta_reposicion - variante.stock),
+      exceso: variante.meta_reposicion == null ? null : Math.max(0, variante.stock - variante.meta_reposicion),
+    })));
+    res.json({ data });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'No se pudo cargar el plan de reposición' }); }
+};
+
+exports.actualizarMetaReposicion = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Variante inválida' });
+    const { meta_reposicion } = req.body;
+    const meta = meta_reposicion === null || meta_reposicion === '' ? null : entero(meta_reposicion, 'Meta de reposición');
+    const variante = await prisma.tbl_inventario_variantes.update({
+      where: { id },
+      data: { meta_reposicion: meta },
+      include: { producto: { select: { nombre: true } } },
+    });
+    await registrarAuditoria({ userId: req.user.id, accion: 'ACTUALIZAR_META_REPOSICION_INVENTARIO', tipoEntidad: 'tbl_inventario_variantes', idEntidad: id, resumen: `Meta de reposición actualizada: ${variante.producto.nombre} · ${variante.nombre} → ${meta ?? 'sin meta'}`, req });
+    res.json({ data: variante });
+  } catch (error) { console.error(error); res.status(error.code === 'P2025' ? 404 : 400).json({ error: error.code === 'P2025' ? 'Variante no encontrada' : error.message || 'No se pudo actualizar la meta de reposición' }); }
+};
+
 exports.crearProducto = async (req, res) => {
   try {
     const { codigo, nombre, categoria, descripcion, precio_venta, costo_compra, stock_minimo = 3, foto_url, variantes = [] } = req.body;
