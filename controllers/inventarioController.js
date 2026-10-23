@@ -12,6 +12,11 @@ const numero = (valor, nombre, minimo = 0) => {
   if (!Number.isFinite(value) || value < minimo) throw new Error(`${nombre} inválido`);
   return value;
 };
+const entero = (valor, nombre, minimo = 0) => {
+  const value = numero(valor, nombre, minimo);
+  if (!Number.isInteger(value)) throw new Error(`${nombre} debe ser un número entero`);
+  return value;
+};
 const precioVariante = variante => Number(variante.precio_venta ?? variante.producto?.precio_venta ?? 0);
 const costoVariante = variante => Number(variante.costo_compra ?? variante.producto?.costo_compra ?? 0);
 
@@ -94,15 +99,15 @@ exports.crearProducto = async (req, res) => {
       const creado = await tx.tbl_inventario_productos.create({ data: {
         codigo: codigoProducto, nombre: nombre.trim(), categoria: categoria.trim(), descripcion: descripcion?.trim() || null,
         precio_venta: precioBase, costo_compra: costoBase,
-        stock_minimo: Math.trunc(numero(stock_minimo, 'Stock mínimo')), foto_url: foto_url?.trim() || null, user_id_registration: req.user.id,
+        stock_minimo: entero(stock_minimo, 'Stock mínimo'), foto_url: foto_url?.trim() || null, user_id_registration: req.user.id,
       } });
       for (const item of variantes) {
-        const stock = Math.trunc(numero(item.stock || 0, 'Stock'));
+        const stock = entero(item.stock || 0, 'Stock');
         const nombreVariante = String(item.nombre || 'Única').trim();
         const sku = item.sku?.trim().toUpperCase() || await codigoDisponible(tx, 'tbl_inventario_variantes', 'sku', `${codigoProducto}-${partesCodigo(nombreVariante) || 'UNICA'}`, 80);
         const variante = await tx.tbl_inventario_variantes.create({ data: {
           id_producto: creado.id, nombre: nombreVariante, sku, stock,
-          stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')),
+          stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : entero(item.stock_minimo, 'Stock mínimo'),
           precio_venta: numero(item.precio_venta ?? precioBase, 'Precio de venta'),
           costo_compra: item.costo_compra === '' || item.costo_compra == null ? costoBase : numero(item.costo_compra, 'Costo de compra'),
         } });
@@ -135,16 +140,16 @@ exports.actualizarProducto = async (req, res) => {
       await tx.tbl_inventario_productos.update({ where: { id }, data: {
         codigo: codigo?.trim().toUpperCase(), nombre: nombre?.trim(), categoria: categoria?.trim(), descripcion: descripcion?.trim() || null,
         precio_venta: precioBase, costo_compra: costoBase,
-        stock_minimo: Math.trunc(numero(stock_minimo, 'Stock mínimo')), foto_url: foto_url?.trim() || null, activo: activo !== false,
+        stock_minimo: entero(stock_minimo, 'Stock mínimo'), foto_url: foto_url?.trim() || null, activo: activo !== false,
         user_id_modification: req.user.id, date_time_modification: new Date(),
       } });
       for (const item of variantes) {
-        if (item.id) await tx.tbl_inventario_variantes.update({ where: { id: Number(item.id) }, data: { nombre: item.nombre.trim(), sku: item.sku.trim().toUpperCase(), stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')), precio_venta: numero(item.precio_venta ?? precioBase, 'Precio de venta'), costo_compra: item.costo_compra === '' || item.costo_compra == null ? costoBase : numero(item.costo_compra, 'Costo de compra'), activo: item.activo !== false } });
+        if (item.id) await tx.tbl_inventario_variantes.update({ where: { id: Number(item.id) }, data: { nombre: item.nombre.trim(), sku: item.sku.trim().toUpperCase(), stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : entero(item.stock_minimo, 'Stock mínimo'), precio_venta: numero(item.precio_venta ?? precioBase, 'Precio de venta'), costo_compra: item.costo_compra === '' || item.costo_compra == null ? costoBase : numero(item.costo_compra, 'Costo de compra'), activo: item.activo !== false } });
         else {
           const productoActual = await tx.tbl_inventario_productos.findUnique({ where: { id }, select: { codigo: true } });
           const sku = item.sku?.trim().toUpperCase() || await codigoDisponible(tx, 'tbl_inventario_variantes', 'sku', `${productoActual.codigo}-${partesCodigo(item.nombre) || 'UNICA'}`, 80);
-          const stock = Math.trunc(numero(item.stock || 0, 'Stock actual'));
-          const variante = await tx.tbl_inventario_variantes.create({ data: { id_producto: id, nombre: item.nombre.trim(), sku, stock, stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : Math.trunc(numero(item.stock_minimo, 'Stock mínimo')), precio_venta: numero(item.precio_venta ?? precioBase, 'Precio de venta'), costo_compra: item.costo_compra === '' || item.costo_compra == null ? costoBase : numero(item.costo_compra, 'Costo de compra') } });
+          const stock = entero(item.stock || 0, 'Stock actual');
+          const variante = await tx.tbl_inventario_variantes.create({ data: { id_producto: id, nombre: item.nombre.trim(), sku, stock, stock_minimo: item.stock_minimo === '' || item.stock_minimo == null ? null : entero(item.stock_minimo, 'Stock mínimo'), precio_venta: numero(item.precio_venta ?? precioBase, 'Precio de venta'), costo_compra: item.costo_compra === '' || item.costo_compra == null ? costoBase : numero(item.costo_compra, 'Costo de compra') } });
           if (stock > 0) await tx.tbl_inventario_movimientos.create({ data: { id_variante: variante.id, tipo: 'INGRESO', cantidad: stock, stock_anterior: 0, stock_nuevo: stock, observacion: 'Stock inicial de variante', registrado_por: req.user.id } });
         }
       }
@@ -257,7 +262,7 @@ exports.registrarMovimiento = async (req, res) => {
     const resultado = await prisma.$transaction(async tx => {
       const variante = await tx.tbl_inventario_variantes.findUnique({ where: { id: Number(id_variante) } });
       if (!variante) throw new Error('Variante no encontrada');
-      const qty = tipo === 'AJUSTE' ? Math.abs(Math.trunc(numero(stock_nuevo, 'Nuevo stock'))) : Math.trunc(numero(cantidad, 'Cantidad', 1));
+      const qty = tipo === 'AJUSTE' ? Math.abs(entero(stock_nuevo, 'Nuevo stock')) : entero(cantidad, 'Cantidad', 1);
       const siguiente = tipo === 'AJUSTE' ? qty : variante.stock + (['INGRESO', 'DEVOLUCION'].includes(tipo) ? qty : -qty);
       if (siguiente < 0) throw new Error('Stock insuficiente para realizar la salida');
       await tx.tbl_inventario_variantes.update({ where: { id: variante.id }, data: { stock: siguiente } });
@@ -297,7 +302,7 @@ exports.crearVenta = async (req, res) => {
       const mapa = new Map(variantes.map(v => [v.id, v]));
       const detalles = items.map(item => {
         const variante = mapa.get(Number(item.id_variante));
-        const cantidad = Math.trunc(numero(item.cantidad, 'Cantidad', 1));
+        const cantidad = entero(item.cantidad, 'Cantidad', 1);
         if (variante.stock < cantidad) throw new Error(`Stock insuficiente para ${variante.producto.nombre} · ${variante.nombre}`);
         const precio = tipo === 'GRATUITA' ? 0 : precioVariante(variante);
         return { variante, cantidad, precio, subtotal: precio * cantidad };
